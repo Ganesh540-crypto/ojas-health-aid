@@ -42,35 +42,32 @@ const ChatContainer = () => {
     setMessages(prev => [...prev, userMessage]);
     setIsLoading(true);
 
-    // Simulate AI response (replace with actual AI integration later)
-    setTimeout(() => {
-      const isHealthQuery = message.toLowerCase().includes('health') || 
-                           message.toLowerCase().includes('pain') ||
-                           message.toLowerCase().includes('symptom') ||
-                           message.toLowerCase().includes('medicine') ||
-                           message.toLowerCase().includes('doctor');
-
-      const responses = isHealthQuery ? [
-        "I understand you have a health-related question. Let me help you with that. Based on your query, I'd recommend consulting with a healthcare professional for personalized advice. In the meantime, here's some general information that might be helpful...",
-        "For health concerns, it's always best to consult with qualified medical professionals. However, I can provide some general guidance and information. Would you like me to search for recent medical research on this topic?",
-        "I notice this is health-related. While I can provide general information, please remember that this doesn't replace professional medical advice. Let me share what I know and suggest some preventive measures..."
-      ] : [
-        "That's an interesting question! Let me help you with that.",
-        "I'd be happy to assist you with that. Here's what I can tell you...",
-        "Great question! Let me provide you with some helpful information."
-      ];
+    try {
+      const { geminiService } = await import('@/lib/gemini');
+      const response = await geminiService.generateResponse(message);
 
       const botMessage: Message = {
         id: (Date.now() + 1).toString(),
-        content: responses[Math.floor(Math.random() * responses.length)],
+        content: response.content,
         isBot: true,
         timestamp: new Date(),
-        healthRelated: isHealthQuery
+        healthRelated: response.isHealthRelated
       };
 
       setMessages(prev => [...prev, botMessage]);
+    } catch (error) {
+      console.error('Error generating response:', error);
+      const errorMessage: Message = {
+        id: (Date.now() + 1).toString(),
+        content: "I apologize, but I encountered an error while processing your request. Please try again.",
+        isBot: true,
+        timestamp: new Date(),
+        healthRelated: false
+      };
+      setMessages(prev => [...prev, errorMessage]);
+    } finally {
       setIsLoading(false);
-    }, 1500);
+    }
   };
 
   return (
