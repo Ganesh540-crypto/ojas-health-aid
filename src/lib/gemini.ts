@@ -1,4 +1,4 @@
-import { GoogleGenAI } from '@google/genai';
+import { GoogleGenAI, DynamicRetrievalConfigMode } from '@google/genai';
 
 const API_KEY = 'AIzaSyDGlcM72TRk56b-IeGzIqChhYHN3y5gPYw';
 
@@ -33,6 +33,8 @@ Your goal is to be a reliable, professional, and emotionally aware AI assistant 
 export class GeminiService {
   private ai: GoogleGenAI;
   private model: string = 'gemini-2.5-flash';
+  private conversationHistory: Array<{role: string, parts: Array<{text: string}>}> = [];
+  private conversationMemory: string[] = [];
 
   constructor() {
     this.ai = new GoogleGenAI({
@@ -47,11 +49,62 @@ export class GeminiService {
       'breathing', 'blood', 'pressure', 'diabetes', 'cancer', 'treatment',
       'prescription', 'pill', 'drug', 'allergy', 'infection', 'virus',
       'bacteria', 'disease', 'condition', 'diagnosis', 'therapy', 'surgery',
-      'emergency', 'urgent', 'serious', 'chronic', 'acute', 'prevention'
+      'emergency', 'urgent', 'serious', 'chronic', 'acute', 'prevention',
+      'wellness', 'fitness', 'diet', 'nutrition', 'exercise', 'sleep',
+      'mental health', 'anxiety', 'depression', 'stress', 'fatigue'
     ];
     
     const lowerMessage = message.toLowerCase();
     return healthKeywords.some(keyword => lowerMessage.includes(keyword));
+  }
+
+  private isImportantHealthQuery(message: string): boolean {
+    const seriousKeywords = [
+      'severe', 'intense', 'emergency', 'urgent', 'serious', 'can\'t breathe',
+      'chest pain', 'heart attack', 'stroke', 'bleeding', 'unconscious',
+      'poisoning', 'overdose', 'allergic reaction', 'broken', 'fracture',
+      'surgery', 'prescription', 'diagnosis', 'treatment plan'
+    ];
+    
+    const lowerMessage = message.toLowerCase();
+    return seriousKeywords.some(keyword => lowerMessage.includes(keyword));
+  }
+
+  private detectTone(message: string): string {
+    const casual = /\b(hey|hi|yo|sup|what's up|whatsup|bro|dude|lol|haha|cool|awesome|nice)\b/i;
+    const romantic = /\b(love|heart|romantic|beautiful|gorgeous|sweetheart|darling|honey)\b/i;
+    const angry = /\b(angry|mad|frustrated|annoyed|pissed|hate|stupid|damn|wtf|fuck)\b/i;
+    const lazy = /\b(lazy|tired|sleepy|bored|meh|whatever|dunno|idk|can't be bothered)\b/i;
+    
+    if (angry.test(message)) return 'angry';
+    if (romantic.test(message)) return 'romantic';
+    if (lazy.test(message)) return 'lazy';
+    if (casual.test(message)) return 'casual';
+    
+    return 'neutral';
+  }
+
+  private addToMemory(userMessage: string, response: string, isHealthRelated: boolean) {
+    this.conversationHistory.push(
+      { role: 'user', parts: [{ text: userMessage }] },
+      { role: 'model', parts: [{ text: response }] }
+    );
+
+    // Keep only last 10 exchanges to manage context length
+    if (this.conversationHistory.length > 20) {
+      this.conversationHistory = this.conversationHistory.slice(-20);
+    }
+
+    // Add important health topics to persistent memory
+    if (isHealthRelated && this.isImportantHealthQuery(userMessage)) {
+      const summary = `User asked about: ${userMessage.substring(0, 100)}... - Health consultation provided`;
+      this.conversationMemory.push(summary);
+      
+      // Keep only last 5 important health consultations
+      if (this.conversationMemory.length > 5) {
+        this.conversationMemory = this.conversationMemory.slice(-5);
+      }
+    }
   }
 
   async generateResponse(message: string): Promise<{
@@ -60,24 +113,44 @@ export class GeminiService {
   }> {
     try {
       const isHealthQuery = this.isHealthRelated(message);
+      const isImportantHealth = isHealthQuery && this.isImportantHealthQuery(message);
+      const tone = this.detectTone(message);
       
+      // Enhanced system instructions with context
+      let enhancedInstructions = SYSTEM_INSTRUCTIONS;
+      
+      if (this.conversationMemory.length > 0) {
+        enhancedInstructions += `\n\nIMPORTANT CONVERSATION CONTEXT:\n${this.conversationMemory.join('\n')}`;
+      }
+
+      if (tone !== 'neutral') {
+        enhancedInstructions += `\n\nUSER TONE DETECTED: ${tone.toUpperCase()} - Adapt your response accordingly while maintaining professionalism.`;
+      }
+
       const tools = isHealthQuery ? [
         {
-          googleSearch: {}
+          googleSearchRetrieval: {
+            dynamicRetrievalConfig: {
+              mode: DynamicRetrievalConfigMode.MODE_DYNAMIC,
+              dynamicThreshold: 0.7,
+            },
+          },
         }
       ] : [];
 
       const config = {
-        systemInstruction: SYSTEM_INSTRUCTIONS,
+        systemInstruction: enhancedInstructions,
         tools,
-        ...(isHealthQuery && {
+        ...(isImportantHealth && {
           thinkingConfig: {
             thinkingBudget: -1,
           }
         })
       };
 
+      // Include conversation history for context
       const contents = [
+        ...this.conversationHistory.slice(-6), // Last 3 exchanges
         {
           role: 'user',
           parts: [
@@ -101,8 +174,13 @@ export class GeminiService {
         }
       }
 
+      const finalResponse = fullResponse || 'I apologize, but I was unable to generate a response. Please try again.';
+      
+      // Add to memory
+      this.addToMemory(message, finalResponse, isHealthQuery);
+
       return {
-        content: fullResponse || 'I apologize, but I was unable to generate a response. Please try again.',
+        content: finalResponse,
         isHealthRelated: isHealthQuery
       };
     } catch (error) {

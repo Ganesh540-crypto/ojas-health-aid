@@ -1,5 +1,7 @@
 import { Brain, User, Clock, CheckCircle2 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 
 interface ChatMessageProps {
   message: string;
@@ -58,7 +60,26 @@ const ChatMessage = ({ message, isBot, timestamp, isThinking, healthRelated }: C
               <span className="text-muted-foreground">Ojas is thinking...</span>
             </div>
           ) : (
-            <div className="whitespace-pre-wrap">{message}</div>
+            <div className="prose prose-invert max-w-none [&>*:first-child]:mt-0 [&>*:last-child]:mb-0">
+              <ReactMarkdown 
+                remarkPlugins={[remarkGfm]}
+                components={{
+                  h1: ({node, ...props}) => <h1 className="text-xl font-bold text-foreground mb-2" {...props} />,
+                  h2: ({node, ...props}) => <h2 className="text-lg font-semibold text-foreground mb-2" {...props} />,
+                  h3: ({node, ...props}) => <h3 className="text-base font-medium text-foreground mb-1" {...props} />,
+                  p: ({node, ...props}) => <p className="text-foreground-secondary mb-2 last:mb-0" {...props} />,
+                  strong: ({node, ...props}) => <strong className="font-semibold text-foreground" {...props} />,
+                  em: ({node, ...props}) => <em className="italic text-foreground" {...props} />,
+                  ul: ({node, ...props}) => <ul className="list-disc list-inside mb-2 text-foreground-secondary" {...props} />,
+                  ol: ({node, ...props}) => <ol className="list-decimal list-inside mb-2 text-foreground-secondary" {...props} />,
+                  li: ({node, ...props}) => <li className="mb-1" {...props} />,
+                  code: ({node, ...props}) => <code className="bg-background-secondary px-1 py-0.5 rounded text-sm text-foreground font-mono" {...props} />,
+                  blockquote: ({node, ...props}) => <blockquote className="border-l-4 border-primary pl-4 italic text-foreground-secondary" {...props} />,
+                }}
+              >
+                {message}
+              </ReactMarkdown>
+            </div>
           )}
         </div>
       </div>
