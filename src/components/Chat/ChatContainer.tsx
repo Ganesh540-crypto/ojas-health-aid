@@ -2,6 +2,7 @@ import { useState, useRef, useEffect } from "react";
 import ChatHeader from "./ChatHeader";
 import ChatMessage from "./ChatMessage";
 import ChatInput from "./ChatInput";
+import WelcomeScreen from "./WelcomeScreen";
 import { ScrollArea } from "@/components/ui/scroll-area";
 
 interface Message {
@@ -13,15 +14,7 @@ interface Message {
 }
 
 const ChatContainer = () => {
-  const [messages, setMessages] = useState<Message[]>([
-    {
-      id: "1",
-      content: "Hello! I'm Ojas AI, your intelligent healthcare assistant. I'm here to help you with general questions, health-related inquiries, and provide guidance when you need it most.\n\nI can assist with:\n• General health questions and wellness tips\n• Understanding symptoms and preventive care\n• Emergency guidance and hospital recommendations\n• Medication information and safety advice\n\nHow can I help you today?",
-      isBot: true,
-      timestamp: new Date(),
-      healthRelated: false
-    }
-  ]);
+  const [messages, setMessages] = useState<Message[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const scrollAreaRef = useRef<HTMLDivElement>(null);
 
@@ -84,28 +77,34 @@ const ChatContainer = () => {
     <div className="h-screen flex flex-col bg-background">
       <ChatHeader />
       
-      <ScrollArea className="flex-1" ref={scrollAreaRef}>
-        <div className="min-h-full">
-          {messages.map((message) => (
-            <ChatMessage
-              key={message.id}
-              message={message.content}
-              isBot={message.isBot}
-              timestamp={message.timestamp}
-              healthRelated={message.healthRelated}
-            />
-          ))}
-          
-          {isLoading && (
-            <ChatMessage
-              message=""
-              isBot={true}
-              timestamp={new Date()}
-              isThinking={true}
-            />
-          )}
-        </div>
-      </ScrollArea>
+      <div className="flex-1 overflow-hidden">
+        {messages.length === 0 ? (
+          <WelcomeScreen onSendMessage={handleSendMessage} />
+        ) : (
+          <ScrollArea className="h-full" ref={scrollAreaRef}>
+            <div className="min-h-full max-w-4xl mx-auto px-6 py-8">
+              {messages.map((message) => (
+                <ChatMessage
+                  key={message.id}
+                  message={message.content}
+                  isBot={message.isBot}
+                  timestamp={message.timestamp}
+                  healthRelated={message.healthRelated}
+                />
+              ))}
+              
+              {isLoading && (
+                <ChatMessage
+                  message=""
+                  isBot={true}
+                  timestamp={new Date()}
+                  isThinking={true}
+                />
+              )}
+            </div>
+          </ScrollArea>
+        )}
+      </div>
       
       <ChatInput onSendMessage={handleSendMessage} isLoading={isLoading} />
     </div>

@@ -8,12 +8,12 @@
 
 @layer base {
   :root {
-    /* Core Background Colors */
-    --background: 220 13% 9%;
-    --background-secondary: 220 13% 12%;
-    --background-tertiary: 220 13% 15%;
-    --foreground: 45 20% 95%;
-    --foreground-secondary: 45 15% 85%;
+    /* Core Background Colors - Light Theme */
+    --background: 0 0% 100%;
+    --background-secondary: 0 0% 98%;
+    --background-tertiary: 0 0% 96%;
+    --foreground: 0 0% 9%;
+    --foreground-secondary: 0 0% 15%;
 
     /* Ojas Orange Brand Colors */
     --primary: 25 95% 60%;
@@ -27,17 +27,17 @@
     --accent-foreground: 220 13% 15%;
 
     /* Card & Component Colors */
-    --card: 220 13% 12%;
-    --card-secondary: 220 13% 15%;
-    --card-foreground: 45 20% 95%;
-    --card-border: 220 13% 20%;
+    --card: 0 0% 100%;
+    --card-secondary: 0 0% 98%;
+    --card-foreground: 0 0% 9%;
+    --card-border: 0 0% 90%;
 
     /* Interactive Elements */
-    --muted: 220 13% 18%;
-    --muted-foreground: 45 15% 70%;
-    --border: 220 13% 20%;
-    --input: 220 13% 15%;
-    --input-border: 220 13% 25%;
+    --muted: 0 0% 94%;
+    --muted-foreground: 0 0% 45%;
+    --border: 0 0% 90%;
+    --input: 0 0% 100%;
+    --input-border: 0 0% 88%;
     --ring: 25 95% 60%;
 
     /* Health Status Colors */
