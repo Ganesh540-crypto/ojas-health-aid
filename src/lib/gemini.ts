@@ -128,16 +128,8 @@ export class GeminiService {
         enhancedInstructions += `\n\nUSER TONE DETECTED: ${tone.toUpperCase()} - Adapt your response tone to match theirs while maintaining helpfulness. For casual tone like "hey bro", respond warmly and casually like "Hey! What can I help you with?" without being overly professional.`;
       }
 
-      const tools = isHealthQuery ? [
-        {
-          googleSearchRetrieval: {
-            dynamicRetrievalConfig: {
-              mode: DynamicRetrievalConfigMode.MODE_DYNAMIC,
-              dynamicThreshold: 0.7,
-            },
-          },
-        }
-      ] : [];
+      // Remove web search tools as they're not supported
+      const tools: any[] = [];
 
       const config = {
         systemInstruction: enhancedInstructions,
