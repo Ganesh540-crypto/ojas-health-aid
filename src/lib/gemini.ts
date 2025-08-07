@@ -1,4 +1,5 @@
 import { GoogleGenAI, DynamicRetrievalConfigMode } from '@google/genai';
+import { googleSearchService } from './googleSearch';
 
 const API_KEY = 'AIzaSyDGlcM72TRk56b-IeGzIqChhYHN3y5gPYw';
 
@@ -128,12 +129,19 @@ export class GeminiService {
         enhancedInstructions += `\n\nUSER TONE DETECTED: ${tone.toUpperCase()} - Adapt your response tone to match theirs while maintaining helpfulness. For casual tone like "hey bro", respond warmly and casually like "Hey! What can I help you with?" without being overly professional.`;
       }
 
-      // Remove web search tools as they're not supported
-      const tools: any[] = [];
+      // Perform web search for health-related queries
+      let searchContext = '';
+      if (isHealthQuery) {
+        const searchResults = await googleSearchService.search(`${message} health medical information`, 3);
+        if (searchResults.length > 0) {
+          searchContext = `\n\nRELEVANT SEARCH RESULTS:\n${googleSearchService.formatSearchResults(searchResults)}`;
+          enhancedInstructions += searchContext;
+        }
+      }
 
       const config = {
         systemInstruction: enhancedInstructions,
-        tools,
+        tools: [], // No Gemini tools needed since we're using custom search
         ...(isImportantHealth && {
           thinkingConfig: {
             thinkingBudget: -1,
