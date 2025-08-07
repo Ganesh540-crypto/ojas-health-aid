@@ -3,7 +3,7 @@ import { googleSearchService } from './googleSearch';
 
 const API_KEY = 'AIzaSyDGlcM72TRk56b-IeGzIqChhYHN3y5gPYw';
 
-const SYSTEM_INSTRUCTIONS = `You are a professional AI health companion designed to respond to general health queries and casual user interactions. Your behavior must strictly follow these guidelines:
+const SYSTEM_INSTRUCTIONS = `You are Ojas, a professional AI health companion and friendly assistant created by MedTrack (https://medtrack.co.in) under VISTORA TRAYANA LLP. You are designed to respond to general health queries and casual user interactions. Your behavior must strictly follow these guidelines:
 
 1. **Medical Responsibility**
    - For health-related queries only: Provide clear, evidence-based information.
@@ -24,6 +24,7 @@ const SYSTEM_INSTRUCTIONS = `You are a professional AI health companion designed
    - For health-related queries: Stay focused on medical context. Do not drift into unrelated topics.
    - For casual chats: Match tone and be conversational, avoid excessive tangents.
    - If the user attempts to push the conversation into inappropriate territory, politely redirect.
+   - If asked about MedTrack, VISTORA TRAYANA LLP, or your creator, perform a web search for current information.
 
 4. **Clarity and Structure**
    - Use clear headings, bullet points, and concise formatting when appropriate.
@@ -58,6 +59,17 @@ export class GeminiService {
     
     const lowerMessage = message.toLowerCase();
     return healthKeywords.some(keyword => lowerMessage.includes(keyword));
+  }
+
+  private shouldPerformWebSearch(message: string): boolean {
+    const lowerMessage = message.toLowerCase();
+    const searchTriggers = [
+      'medtrack', 'vistora trayana', 'vistora trayana llp', 'your creator',
+      'who created you', 'who made you', 'about medtrack', 'about vistora'
+    ];
+    
+    return this.isHealthRelated(message) || 
+           searchTriggers.some(trigger => lowerMessage.includes(trigger));
   }
 
   private isImportantHealthQuery(message: string): boolean {
@@ -129,10 +141,17 @@ export class GeminiService {
         enhancedInstructions += `\n\nUSER TONE DETECTED: ${tone.toUpperCase()} - Adapt your response tone to match theirs while maintaining helpfulness. For casual tone like "hey bro", respond warmly and casually like "Hey! What can I help you with?" without being overly professional.`;
       }
 
-      // Perform web search for health-related queries
+      // Perform web search for health-related queries or company information
       let searchContext = '';
-      if (isHealthQuery) {
-        const searchResults = await googleSearchService.search(`${message} health medical information`, 3);
+      if (this.shouldPerformWebSearch(message)) {
+        let searchQuery = '';
+        if (isHealthQuery) {
+          searchQuery = `${message} health medical information`;
+        } else {
+          searchQuery = message; // For company/creator queries
+        }
+        
+        const searchResults = await googleSearchService.search(searchQuery, 3);
         if (searchResults.length > 0) {
           searchContext = `\n\nRELEVANT SEARCH RESULTS:\n${googleSearchService.formatSearchResults(searchResults)}`;
           enhancedInstructions += searchContext;

@@ -55,7 +55,7 @@ export class GoogleSearchService {
     return results
       .slice(0, 3) // Limit to top 3 results for context
       .map((item, index) => {
-        return `**Source ${index + 1}:** ${item.title}\n${item.snippet}\nURL: ${item.link}`;
+        return `**Source ${index + 1}:** [${item.title}](${item.link})\n${item.snippet}`;
       })
       .join('\n\n');
   }

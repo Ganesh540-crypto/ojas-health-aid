@@ -16,6 +16,7 @@ interface Message {
 const ChatContainer = () => {
   const [messages, setMessages] = useState<Message[]>([]);
   const [isLoading, setIsLoading] = useState(false);
+  const [editingMessage, setEditingMessage] = useState<string>("");
   const scrollAreaRef = useRef<HTMLDivElement>(null);
 
   const scrollToBottom = () => {
@@ -31,10 +32,40 @@ const ChatContainer = () => {
     scrollToBottom();
   }, [messages]);
 
-  const handleSendMessage = async (message: string) => {
+  const handleSendMessage = async (message: string, files?: File[]) => {
+    let finalMessage = message;
+    
+    // Handle file uploads by adding file descriptions to message
+    if (files && files.length > 0) {
+      const fileDescriptions = files.map(file => {
+        if (file.type.startsWith('image/')) {
+          return `[Image uploaded: ${file.name}]`;
+        } else if (file.type === 'application/pdf') {
+          return `[PDF uploaded: ${file.name}]`;
+        } else {
+          return `[File uploaded: ${file.name}]`;
+        }
+      }).join('\n');
+      
+      finalMessage = `${message}\n\n${fileDescriptions}`;
+    }
+
+    // If editing, update the existing message instead of creating new one
+    if (editingMessage) {
+      setMessages(prev => 
+        prev.map(msg => 
+          msg.content === editingMessage && !msg.isBot 
+            ? { ...msg, content: finalMessage, timestamp: new Date() }
+            : msg
+        )
+      );
+      setEditingMessage("");
+      return;
+    }
+
     const userMessage: Message = {
       id: Date.now().toString(),
-      content: message,
+      content: finalMessage,
       isBot: false,
       timestamp: new Date()
     };
@@ -44,7 +75,7 @@ const ChatContainer = () => {
 
     try {
       const { geminiService } = await import('@/lib/gemini');
-      const response = await geminiService.generateResponse(message);
+      const response = await geminiService.generateResponse(finalMessage);
 
       const botMessage: Message = {
         id: (Date.now() + 1).toString(),
@@ -70,6 +101,14 @@ const ChatContainer = () => {
     }
   };
 
+  const handleEditMessage = (messageContent: string) => {
+    setEditingMessage(messageContent);
+  };
+
+  const handleCancelEdit = () => {
+    setEditingMessage("");
+  };
+
   return (
     <div className="h-screen flex flex-col bg-background">
       <ChatHeader />
@@ -87,6 +126,7 @@ const ChatContainer = () => {
                   isBot={message.isBot}
                   timestamp={message.timestamp}
                   healthRelated={message.healthRelated}
+                  onEdit={!message.isBot ? handleEditMessage : undefined}
                 />
               ))}
               
@@ -103,7 +143,12 @@ const ChatContainer = () => {
         )}
       </div>
       
-      <ChatInput onSendMessage={handleSendMessage} isLoading={isLoading} />
+      <ChatInput 
+        onSendMessage={handleSendMessage} 
+        isLoading={isLoading}
+        editMessage={editingMessage}
+        onCancelEdit={handleCancelEdit}
+      />
     </div>
   );
 };

@@ -19,8 +19,8 @@ export default {
 		},
 		extend: {
 			fontFamily: {
-				'futuristic': ['Orbitron', 'monospace'],
-				'inter': ['Inter', 'sans-serif'],
+				'nunito': ['Nunito', 'sans-serif'],
+				'sans': ['Nunito', 'sans-serif'],
 			},
 			colors: {
 				border: 'hsl(var(--border))',
