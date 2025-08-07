@@ -46,10 +46,7 @@ const ChatMessage = ({ message, isBot, timestamp, isThinking, healthRelated }: C
           </div>
         </div>
         
-        <div className={cn(
-          "prose prose-invert max-w-none",
-          "text-foreground-secondary leading-relaxed"
-        )}>
+        <div className="text-foreground leading-relaxed">
           {isThinking ? (
             <div className="flex items-center gap-2">
               <div className="flex gap-1">
@@ -60,21 +57,23 @@ const ChatMessage = ({ message, isBot, timestamp, isThinking, healthRelated }: C
               <span className="text-muted-foreground">Ojas is thinking...</span>
             </div>
           ) : (
-            <div className="prose prose-invert max-w-none [&>*:first-child]:mt-0 [&>*:last-child]:mb-0">
+            <div className="prose prose-neutral dark:prose-invert max-w-none [&>*:first-child]:mt-0 [&>*:last-child]:mb-0">
               <ReactMarkdown 
                 remarkPlugins={[remarkGfm]}
                 components={{
-                  h1: ({node, ...props}) => <h1 className="text-xl font-bold text-foreground mb-2" {...props} />,
-                  h2: ({node, ...props}) => <h2 className="text-lg font-semibold text-foreground mb-2" {...props} />,
-                  h3: ({node, ...props}) => <h3 className="text-base font-medium text-foreground mb-1" {...props} />,
-                  p: ({node, ...props}) => <p className="text-foreground-secondary mb-2 last:mb-0" {...props} />,
+                  h1: ({node, ...props}) => <h1 className="text-xl font-bold text-foreground mb-3 mt-0" {...props} />,
+                  h2: ({node, ...props}) => <h2 className="text-lg font-semibold text-foreground mb-2 mt-0" {...props} />,
+                  h3: ({node, ...props}) => <h3 className="text-base font-medium text-foreground mb-2 mt-0" {...props} />,
+                  p: ({node, ...props}) => <p className="text-foreground mb-3 last:mb-0 leading-relaxed" {...props} />,
                   strong: ({node, ...props}) => <strong className="font-semibold text-foreground" {...props} />,
                   em: ({node, ...props}) => <em className="italic text-foreground" {...props} />,
-                  ul: ({node, ...props}) => <ul className="list-disc list-inside mb-2 text-foreground-secondary" {...props} />,
-                  ol: ({node, ...props}) => <ol className="list-decimal list-inside mb-2 text-foreground-secondary" {...props} />,
-                  li: ({node, ...props}) => <li className="mb-1" {...props} />,
-                  code: ({node, ...props}) => <code className="bg-background-secondary px-1 py-0.5 rounded text-sm text-foreground font-mono" {...props} />,
-                  blockquote: ({node, ...props}) => <blockquote className="border-l-4 border-primary pl-4 italic text-foreground-secondary" {...props} />,
+                  ul: ({node, ...props}) => <ul className="list-disc pl-5 mb-3 text-foreground space-y-1" {...props} />,
+                  ol: ({node, ...props}) => <ol className="list-decimal pl-5 mb-3 text-foreground space-y-1" {...props} />,
+                  li: ({node, ...props}) => <li className="leading-relaxed" {...props} />,
+                  code: ({node, ...props}) => <code className="bg-muted px-1.5 py-0.5 rounded text-sm text-foreground font-mono" {...props} />,
+                  pre: ({node, ...props}) => <pre className="bg-muted p-3 rounded-lg overflow-x-auto mb-3" {...props} />,
+                  blockquote: ({node, ...props}) => <blockquote className="border-l-4 border-primary pl-4 italic text-muted-foreground mb-3" {...props} />,
+                  a: ({node, ...props}) => <a className="text-primary hover:underline" {...props} />,
                 }}
               >
                 {message}

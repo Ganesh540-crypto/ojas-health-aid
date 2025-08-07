@@ -10,35 +10,25 @@
   :root {
     /* Core Background Colors - Light Theme */
     --background: 0 0% 100%;
-    --background-secondary: 0 0% 98%;
-    --background-tertiary: 0 0% 96%;
-    --foreground: 0 0% 9%;
-    --foreground-secondary: 0 0% 15%;
-
-    /* Ojas Orange Brand Colors */
-    --primary: 25 95% 60%;
-    --primary-hover: 25 95% 65%;
-    --primary-foreground: 220 13% 9%;
-    --primary-glow: 25 90% 70%;
-
-    /* Cream Accents */
-    --accent: 45 25% 88%;
-    --accent-dark: 45 20% 82%;
-    --accent-foreground: 220 13% 15%;
-
-    /* Card & Component Colors */
+    --foreground: 222.2 84% 4.9%;
     --card: 0 0% 100%;
-    --card-secondary: 0 0% 98%;
-    --card-foreground: 0 0% 9%;
-    --card-border: 0 0% 90%;
+    --card-foreground: 222.2 84% 4.9%;
+    --popover: 0 0% 100%;
+    --popover-foreground: 222.2 84% 4.9%;
 
-    /* Interactive Elements */
-    --muted: 0 0% 94%;
-    --muted-foreground: 0 0% 45%;
-    --border: 0 0% 90%;
-    --input: 0 0% 100%;
-    --input-border: 0 0% 88%;
-    --ring: 25 95% 60%;
+    --primary: 222.2 47.4% 11.2%;
+    --primary-foreground: 210 40% 98%;
+    --secondary: 210 40% 96%;
+    --secondary-foreground: 222.2 84% 4.9%;
+    --muted: 210 40% 96%;
+    --muted-foreground: 215.4 16.3% 46.9%;
+    --accent: 210 40% 96%;
+    --accent-foreground: 222.2 84% 4.9%;
+    --destructive: 0 62.8% 30.6%;
+    --destructive-foreground: 210 40% 98%;
+    --border: 214.3 31.8% 91.4%;
+    --input: 214.3 31.8% 91.4%;
+    --ring: 222.2 84% 4.9%;
 
     /* Health Status Colors */
     --success: 142 70% 45%;
