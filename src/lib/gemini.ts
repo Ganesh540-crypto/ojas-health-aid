@@ -121,7 +121,7 @@ export class GeminiService {
     }
   }
 
-  async generateResponse(message: string): Promise<{
+  async generateResponse(message: string, options?: { forceSearch?: boolean }): Promise<{
     content: string;
     isHealthRelated: boolean;
   }> {
@@ -129,6 +129,7 @@ export class GeminiService {
       const isHealthQuery = this.isHealthRelated(message);
       const isImportantHealth = isHealthQuery && this.isImportantHealthQuery(message);
       const tone = this.detectTone(message);
+      const forceSearch = options?.forceSearch === true;
       
       // Enhanced system instructions with context
       let enhancedInstructions = SYSTEM_INSTRUCTIONS;
@@ -144,7 +145,7 @@ export class GeminiService {
       // Perform web search for health-related queries or company information
       let searchContext = '';
       let sourcesMarkdown = '';
-      if (this.shouldPerformWebSearch(message)) {
+      if (forceSearch || this.shouldPerformWebSearch(message)) {
         let searchQuery = '';
         if (isHealthQuery) {
           // Bias toward authoritative/India-relevant sources

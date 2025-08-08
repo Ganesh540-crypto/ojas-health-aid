@@ -22,7 +22,7 @@ export class GoogleSearchService {
 
   constructor() {
     // Using demo API key - in production, this should come from Supabase secrets
-    this.apiKey = 'AIzaSyBl0pHldOtJr2l0VmgLQpcWelQ9oJ8--E0';
+    this.apiKey = 'AIzaSyDGlcM72TRk56b-IeGzIqChhYHN3y5gPYw';
     this.searchEngineId = '748584bebb02646c9';
   }
 

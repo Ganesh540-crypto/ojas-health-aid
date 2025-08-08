@@ -74,8 +74,8 @@ const ChatContainer = () => {
     setIsLoading(true);
 
     try {
-      const { geminiService } = await import('@/lib/gemini');
-      const response = await geminiService.generateResponse(finalMessage);
+      const { aiRouter } = await import('@/lib/aiRouter');
+      const response = await aiRouter.route(finalMessage);
 
       const botMessage: Message = {
         id: (Date.now() + 1).toString(),
