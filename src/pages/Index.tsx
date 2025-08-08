@@ -1,7 +1,12 @@
+import AppLayout from "@/components/layout/AppLayout";
 import ChatContainer from "@/components/Chat/ChatContainer";
 
 const Index = () => {
-  return <ChatContainer />;
+  return (
+    <AppLayout>
+      <ChatContainer />
+    </AppLayout>
+  );
 };
 
 export default Index;

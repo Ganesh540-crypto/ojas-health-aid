@@ -1,5 +1,6 @@
 import { useState, useRef, useEffect } from "react";
-import ChatHeader from "./ChatHeader";
+// Layout header is provided by Topbar; ChatHeader removed
+
 import ChatMessage from "./ChatMessage";
 import ChatInput from "./ChatInput";
 import WelcomeScreen from "./WelcomeScreen";
@@ -31,6 +32,17 @@ const ChatContainer = () => {
   useEffect(() => {
     scrollToBottom();
   }, [messages]);
+
+  // Listen for global 'new chat' trigger from sidebar
+  useEffect(() => {
+    const handler = () => {
+      setMessages([]);
+      setEditingMessage("");
+    };
+    window.addEventListener('ojas:new-chat', handler);
+    return () => window.removeEventListener('ojas:new-chat', handler);
+  }, []);
+
 
   const handleSendMessage = async (message: string, files?: File[]) => {
     let finalMessage = message;
@@ -110,8 +122,8 @@ const ChatContainer = () => {
   };
 
   return (
-    <div className="h-screen flex flex-col bg-background">
-      <ChatHeader />
+    <div className="flex flex-col h-full bg-background">
+
       
       <div className="flex-1 overflow-hidden">
         {messages.length === 0 ? (
@@ -119,6 +131,13 @@ const ChatContainer = () => {
         ) : (
           <ScrollArea className="h-full" ref={scrollAreaRef}>
             <div className="min-h-full max-w-4xl mx-auto px-6 py-8">
+              {messages.length > 0 && (
+                <header className="mb-6">
+                  <h1 className="font-futuristic text-2xl sm:text-3xl text-foreground">
+                    {([...messages].reverse().find(m => !m.isBot)?.content || 'Ask something...').split('\n')[0]}
+                  </h1>
+                </header>
+              )}
               {messages.map((message) => (
                 <ChatMessage
                   key={message.id}
@@ -129,6 +148,7 @@ const ChatContainer = () => {
                   onEdit={!message.isBot ? handleEditMessage : undefined}
                 />
               ))}
+
               
               {isLoading && (
                 <ChatMessage
