@@ -143,18 +143,20 @@ export class GeminiService {
 
       // Perform web search for health-related queries or company information
       let searchContext = '';
+      let sourcesMarkdown = '';
       if (this.shouldPerformWebSearch(message)) {
         let searchQuery = '';
         if (isHealthQuery) {
-          searchQuery = `${message} health medical information`;
+          // Bias toward authoritative/India-relevant sources
+          searchQuery = `${message} site:.gov OR site:.org OR site:.edu OR india`;
         } else {
           searchQuery = message; // For company/creator queries
         }
         
         const searchResults = await googleSearchService.search(searchQuery, 3);
         if (searchResults.length > 0) {
-          searchContext = `\n\nRELEVANT SEARCH RESULTS:\n${googleSearchService.formatSearchResults(searchResults)}`;
-          enhancedInstructions += searchContext;
+          sourcesMarkdown = googleSearchService.formatSearchResults(searchResults);
+          searchContext = `RELEVANT SEARCH RESULTS:\n${sourcesMarkdown}`;
         }
       }
 
@@ -171,13 +173,10 @@ export class GeminiService {
       // Include conversation history for context
       const contents = [
         ...this.conversationHistory.slice(-6), // Last 3 exchanges
+        ...(searchContext ? [{ role: 'user', parts: [{ text: searchContext }] }] : []),
         {
           role: 'user',
-          parts: [
-            {
-              text: message,
-            },
-          ],
+          parts: [{ text: message }],
         },
       ];
 
@@ -196,11 +195,16 @@ export class GeminiService {
 
       const finalResponse = fullResponse || 'I apologize, but I was unable to generate a response. Please try again.';
       
+      // Append sources for user visibility if available
+      const responseWithSources = sourcesMarkdown
+        ? `${finalResponse}\n\nSources:\n${sourcesMarkdown}`
+        : finalResponse;
+      
       // Add to memory
-      this.addToMemory(message, finalResponse, isHealthQuery);
+      this.addToMemory(message, responseWithSources, isHealthQuery);
 
       return {
-        content: finalResponse,
+        content: responseWithSources,
         isHealthRelated: isHealthQuery
       };
     } catch (error) {
