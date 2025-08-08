@@ -1,3 +1,5 @@
+import axios from 'axios';
+
 interface GoogleSearchItem {
   title: string;
   link: string;
@@ -26,20 +28,19 @@ export class GoogleSearchService {
 
   async search(query: string, numResults: number = 5): Promise<GoogleSearchItem[]> {
     try {
-      const url = new URL('https://www.googleapis.com/customsearch/v1');
-      url.searchParams.append('key', this.apiKey);
-      url.searchParams.append('cx', this.searchEngineId);
-      url.searchParams.append('q', query);
-      url.searchParams.append('num', numResults.toString());
+      const response = await axios.get(
+        `https://www.googleapis.com/customsearch/v1`,
+        {
+          params: {
+            key: this.apiKey,
+            cx: this.searchEngineId,
+            q: query,
+            num: numResults.toString(),
+          },
+        }
+      );
 
-      const response = await fetch(url.toString());
-      
-      if (!response.ok) {
-        throw new Error(`Google Search API error: ${response.status}`);
-      }
-
-      const data: GoogleSearchResponse = await response.json();
-      
+      const data: GoogleSearchResponse = response.data;
       return data.items || [];
     } catch (error) {
       console.error('Google Search API Error:', error);
