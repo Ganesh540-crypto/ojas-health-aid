@@ -21,7 +21,7 @@ export class GoogleSearchService {
   constructor() {
     // Using demo API key - in production, this should come from Supabase secrets
     this.apiKey = 'AIzaSyBl0pHldOtJr2l0VmgLQpcWelQ9oJ8--E0';
-    this.searchEngineId = '017576662512468239146:omuauf_lfve';
+    this.searchEngineId = '748584bebb02646c9';
   }
 
   async search(query: string, numResults: number = 5): Promise<GoogleSearchItem[]> {
