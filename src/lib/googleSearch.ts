@@ -36,6 +36,10 @@ export class GoogleSearchService {
             cx: this.searchEngineId,
             q: query,
             num: numResults.toString(),
+            gl: 'IN',
+            hl: 'en',
+            lr: 'lang_en',
+            safe: 'off',
           },
         }
       );
@@ -56,7 +60,10 @@ export class GoogleSearchService {
     return results
       .slice(0, 3) // Limit to top 3 results for context
       .map((item, index) => {
-        return `**Source ${index + 1}:** [${item.title}](${item.link})\n${item.snippet}`;
+        let domain = '';
+        try { domain = new URL(item.link).hostname.replace(/^www\./, ''); } catch {}
+        const snippet = (item.snippet || '').replace(/\s+/g, ' ').trim().slice(0, 220);
+        return `**Source ${index + 1}:** [${item.title}](${item.link}) - ${domain}\n${snippet}`;
       })
       .join('\n\n');
   }

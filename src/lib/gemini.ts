@@ -141,7 +141,7 @@ export class GeminiService {
       const forceSearch = options?.forceSearch === true;
 
       // Enhanced system instructions with strict grounding to sources when present
-      let enhancedInstructions = SYSTEM_INSTRUCTIONS + `\n\nWhen SOURCES are provided, you MUST ground all factual statements in them and include inline bracket citations like [1], [2] that correspond to the numbered sources. Do not say you lack up-to-date information if sources are provided. If sources are insufficient, ask a concise clarifying question before proceeding.`;
+      let enhancedInstructions = SYSTEM_INSTRUCTIONS + `\n\nWhen SOURCES are provided, you MUST ground all factual statements in them and include inline bracket citations like [1], [2] that correspond to the numbered sources. Do not say you lack up-to-date information if sources are provided. Never state that you cannot browse the internet — you are given sources to read when available. If sources are insufficient or missing, say "No relevant sources found" briefly and ask one targeted clarifying question before proceeding.`;
 
       if (this.conversationMemory.length > 0) {
         enhancedInstructions += `\n\nIMPORTANT CONVERSATION CONTEXT:\n${this.conversationMemory.join('\n')}`;
@@ -155,12 +155,29 @@ export class GeminiService {
       let searchContext = '';
       let sourcesMarkdown = '';
       if (forceSearch || this.shouldPerformWebSearch(baseForHealth)) {
-        const queryForSearch = options?.rewrittenQuery ?? baseForHealth;
-        const searchQuery = isHealthQuery
-          ? `${queryForSearch} site:.gov OR site:.org OR site:.edu OR india`
-          : queryForSearch;
+        const baseQuery = options?.rewrittenQuery ?? baseForHealth;
+        const lowerQ = baseQuery.toLowerCase();
+        const productLike = /\b(buy|price|cost|cheap|affordable|low cost|tablet|capsule|supplement|omega|vitamin|protein|multivitamin|fish oil|algal oil)\b/.test(lowerQ);
+        const cities = ['hyderabad','mumbai','delhi','new delhi','bangalore','bengaluru','chennai','kolkata','pune','ahmedabad','jaipur','surat','lucknow','indore','bhopal'];
+        const foundCity = cities.find(c => lowerQ.includes(c));
+        const locationPhrase = foundCity ? ` "${foundCity}"` : '';
 
-        const searchResults = await googleSearchService.search(searchQuery, 3);
+        const evidenceFilter = `${baseQuery} site:.gov OR site:.org OR site:.edu OR india${locationPhrase}`;
+        const ecommerceFilter = `${baseQuery}${locationPhrase} site:1mg.com OR site:pharmeasy.in OR site:netmeds.com OR site:apollo247.com OR site:amazon.in OR site:flipkart.com`;
+        const plainQuery = `${baseQuery}${locationPhrase}`;
+
+        const candidates = productLike ? [ecommerceFilter, plainQuery, evidenceFilter] : [evidenceFilter, plainQuery];
+
+        let searchResults: any[] = [];
+        for (const q of candidates) {
+          const r = await googleSearchService.search(q, 5);
+          if (r.length > 0) { searchResults = r; break; }
+        }
+        if (searchResults.length === 0) {
+          const r = await googleSearchService.search(baseQuery, 5);
+          if (r.length > 0) searchResults = r;
+        }
+
         if (searchResults.length > 0) {
           sourcesMarkdown = googleSearchService.formatSearchResults(searchResults);
           searchContext = `SOURCES (numbered):\n${sourcesMarkdown}`;

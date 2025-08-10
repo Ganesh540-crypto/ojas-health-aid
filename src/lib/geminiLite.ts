@@ -58,9 +58,11 @@ class GeminiLiteService {
   async rephraseForResearch(message: string, options?: { historyText?: string }): Promise<string> {
     const system = `You are a world-class query refiner for web research. Given the user's request and optional chat context, rewrite it into a precise, richly-specified research prompt that captures:
 - key entities, constraints, and intent
-- region or market context (India if implied)
-- relevant synonyms (e.g., generic vs brand names)
-- measurable details (price ranges, dosages, formulations) when applicable
+- correct typos and normalize medical/product terms (e.g., tablets vs table, omega-3, DHA, EPA)
+- region or market context (include the city/state/country if mentioned; default to India if implied)
+- relevant synonyms (e.g., generic vs brand names; fish oil, algal oil)
+- measurable details (price ranges, budget words like "low cost", dosage forms, strengths) when applicable
+- add likely retailer/pharmacy keywords when searching for availability (e.g., 1mg, PharmEasy, NetMeds, Apollo, Amazon India, Flipkart)
 Output only the rewritten prompt with no extra commentary.`;
 
     const contents: Array<{ role: 'user'; parts: { text: string }[] }> = [];
