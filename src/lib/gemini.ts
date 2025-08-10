@@ -121,49 +121,55 @@ export class GeminiService {
     }
   }
 
-  async generateResponse(message: string, options?: { forceSearch?: boolean }): Promise<{
+  async generateResponse(
+    message: string,
+    options?: {
+      forceSearch?: boolean;
+      historyParts?: Array<{ role: string; parts: { text: string }[] }>;
+      originalMessage?: string;
+      rewrittenQuery?: string;
+    }
+  ): Promise<{
     content: string;
     isHealthRelated: boolean;
   }> {
     try {
-      const isHealthQuery = this.isHealthRelated(message);
-      const isImportantHealth = isHealthQuery && this.isImportantHealthQuery(message);
-      const tone = this.detectTone(message);
+      const baseForHealth = options?.originalMessage ?? message;
+      const isHealthQuery = this.isHealthRelated(baseForHealth);
+      const isImportantHealth = isHealthQuery && this.isImportantHealthQuery(baseForHealth);
+      const tone = this.detectTone(baseForHealth);
       const forceSearch = options?.forceSearch === true;
-      
-      // Enhanced system instructions with context
-      let enhancedInstructions = SYSTEM_INSTRUCTIONS;
-      
+
+      // Enhanced system instructions with strict grounding to sources when present
+      let enhancedInstructions = SYSTEM_INSTRUCTIONS + `\n\nWhen SOURCES are provided, you MUST ground all factual statements in them and include inline bracket citations like [1], [2] that correspond to the numbered sources. Do not say you lack up-to-date information if sources are provided. If sources are insufficient, ask a concise clarifying question before proceeding.`;
+
       if (this.conversationMemory.length > 0) {
         enhancedInstructions += `\n\nIMPORTANT CONVERSATION CONTEXT:\n${this.conversationMemory.join('\n')}`;
       }
 
       if (tone !== 'neutral') {
-        enhancedInstructions += `\n\nUSER TONE DETECTED: ${tone.toUpperCase()} - Adapt your response tone to match theirs while maintaining helpfulness. For casual tone like "hey bro", respond warmly and casually like "Hey! What can I help you with?" without being overly professional.`;
+        enhancedInstructions += `\n\nUSER TONE DETECTED: ${tone.toUpperCase()} - Adapt your response tone accordingly while staying helpful.`;
       }
 
-      // Perform web search for health-related queries or company information
+      // Perform web search when requested or deemed necessary
       let searchContext = '';
       let sourcesMarkdown = '';
-      if (forceSearch || this.shouldPerformWebSearch(message)) {
-        let searchQuery = '';
-        if (isHealthQuery) {
-          // Bias toward authoritative/India-relevant sources
-          searchQuery = `${message} site:.gov OR site:.org OR site:.edu OR india`;
-        } else {
-          searchQuery = message; // For company/creator queries
-        }
-        
+      if (forceSearch || this.shouldPerformWebSearch(baseForHealth)) {
+        const queryForSearch = options?.rewrittenQuery ?? baseForHealth;
+        const searchQuery = isHealthQuery
+          ? `${queryForSearch} site:.gov OR site:.org OR site:.edu OR india`
+          : queryForSearch;
+
         const searchResults = await googleSearchService.search(searchQuery, 3);
         if (searchResults.length > 0) {
           sourcesMarkdown = googleSearchService.formatSearchResults(searchResults);
-          searchContext = `RELEVANT SEARCH RESULTS:\n${sourcesMarkdown}`;
+          searchContext = `SOURCES (numbered):\n${sourcesMarkdown}`;
         }
       }
 
       const config = {
         systemInstruction: enhancedInstructions,
-        tools: [], // No Gemini tools needed since we're using custom search
+        tools: [] as any[],
         ...(isImportantHealth && {
           thinkingConfig: {
             thinkingBudget: -1,
@@ -171,15 +177,25 @@ export class GeminiService {
         })
       };
 
-      // Include conversation history for context
-      const contents = [
-        ...this.conversationHistory.slice(-6), // Last 3 exchanges
-        ...(searchContext ? [{ role: 'user', parts: [{ text: searchContext }] }] : []),
-        {
-          role: 'user',
-          parts: [{ text: message }],
-        },
+      // Build conversation context
+      const history = options?.historyParts && options.historyParts.length > 0
+        ? options.historyParts.slice(-6)
+        : this.conversationHistory.slice(-6);
+
+      const contents: Array<{ role: string; parts: { text: string }[] }> = [
+        ...history,
       ];
+
+      if (searchContext) {
+        contents.push({ role: 'user', parts: [{ text: `You must answer grounded strictly in the SOURCES below. Use bracket citations like [1], [2] that map to the numbered sources. If information is insufficient, ask a clarifying question.\n\n${searchContext}` }] });
+      }
+
+      if (options?.rewrittenQuery || options?.originalMessage) {
+        const combo = `ORIGINAL QUERY:\n${options?.originalMessage ?? message}\n\nREWRITTEN FOR RESEARCH:\n${options?.rewrittenQuery ?? ''}`.trim();
+        contents.push({ role: 'user', parts: [{ text: combo }] });
+      }
+
+      contents.push({ role: 'user', parts: [{ text: message }] });
 
       const response = await this.ai.models.generateContentStream({
         model: this.model,
@@ -195,24 +211,23 @@ export class GeminiService {
       }
 
       const finalResponse = fullResponse || 'I apologize, but I was unable to generate a response. Please try again.';
-      
-      // Append sources for user visibility if available
+
       const responseWithSources = sourcesMarkdown
         ? `${finalResponse}\n\nSources:\n${sourcesMarkdown}`
         : finalResponse;
-      
-      // Add to memory
-      this.addToMemory(message, responseWithSources, isHealthQuery);
+
+      // Add to internal memory for continuity
+      this.addToMemory(baseForHealth, responseWithSources, isHealthQuery);
 
       return {
         content: responseWithSources,
-        isHealthRelated: isHealthQuery
+        isHealthRelated: isHealthQuery,
       };
     } catch (error) {
       console.error('Gemini API Error:', error);
       return {
         content: 'I apologize, but I encountered an error while processing your request. Please try again.',
-        isHealthRelated: false
+        isHealthRelated: false,
       };
     }
   }

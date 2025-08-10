@@ -29,12 +29,14 @@ class GeminiLiteService {
     return healthKeywords.some(k => lower.includes(k));
   }
 
-  async generateResponse(message: string): Promise<{ content: string; isHealthRelated: boolean }>{
+  async generateResponse(message: string, options?: { historyText?: string }): Promise<{ content: string; isHealthRelated: boolean }>{
     const isHealth = this.isHealthRelated(message);
 
-    const contents = [
-      { role: 'user' as const, parts: [{ text: message }] },
-    ];
+    const contents: Array<{ role: 'user'; parts: { text: string }[] }> = [];
+    if (options?.historyText) {
+      contents.push({ role: 'user', parts: [{ text: `CONVERSATION CONTEXT:\n${options.historyText}` }] });
+    }
+    contents.push({ role: 'user', parts: [{ text: message }] });
 
     const response = await this.ai.models.generateContentStream({
       model: this.model,
@@ -51,6 +53,33 @@ class GeminiLiteService {
       content: full || 'Sorry, I could not generate a response. Please try again.',
       isHealthRelated: isHealth,
     };
+  }
+
+  async rephraseForResearch(message: string, options?: { historyText?: string }): Promise<string> {
+    const system = `You are a world-class query refiner for web research. Given the user's request and optional chat context, rewrite it into a precise, richly-specified research prompt that captures:
+- key entities, constraints, and intent
+- region or market context (India if implied)
+- relevant synonyms (e.g., generic vs brand names)
+- measurable details (price ranges, dosages, formulations) when applicable
+Output only the rewritten prompt with no extra commentary.`;
+
+    const contents: Array<{ role: 'user'; parts: { text: string }[] }> = [];
+    if (options?.historyText) {
+      contents.push({ role: 'user', parts: [{ text: `CHAT CONTEXT:\n${options.historyText}` }] });
+    }
+    contents.push({ role: 'user', parts: [{ text: `USER REQUEST:\n${message}` }] });
+
+    const stream = await this.ai.models.generateContentStream({
+      model: this.model,
+      config: { systemInstruction: system },
+      contents,
+    });
+
+    let text = '';
+    for await (const chunk of stream) {
+      if (chunk.text) text += chunk.text;
+    }
+    return text.trim() || message;
   }
 }
 

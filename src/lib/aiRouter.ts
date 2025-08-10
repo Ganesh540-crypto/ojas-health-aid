@@ -1,7 +1,7 @@
 import { GoogleGenAI } from '@google/genai';
 import { geminiLiteService } from './geminiLite';
 import { geminiSearchService } from './geminiSearch';
-
+import { memoryStore } from './memory';
 const API_KEY = 'AIzaSyDGlcM72TRk56b-IeGzIqChhYHN3y5gPYw';
 
 type Decision = 'casual' | 'critical';
@@ -55,21 +55,40 @@ class AIRouter {
       if (parsed.decision === 'casual' || parsed.decision === 'critical') {
         return parsed.decision;
       }
-      return this.heuristicDecision(message);
+      return 'critical';
     } catch {
-      return this.heuristicDecision(message);
+      return 'critical';
     }
   }
 
   async route(message: string): Promise<RouteResult> {
+    // Record user message in shared memory
+    memoryStore.addUser(message);
+
     const decision = await this.classify(message);
 
     if (decision === 'critical') {
-      const resp = await geminiSearchService.generateResponse(message, { forceSearch: true });
+      // Rephrase and enrich the query for better research
+      const rewritten = await geminiLiteService.rephraseForResearch(message, {
+        historyText: memoryStore.getPlainHistory(8),
+      });
+
+      const resp = await geminiSearchService.generateResponse(rewritten, {
+        forceSearch: true,
+        historyParts: memoryStore.getHistoryParts(),
+        originalMessage: message,
+        rewrittenQuery: rewritten,
+      });
+
+      // Save assistant reply to memory
+      memoryStore.addAssistant(resp.content);
       return { ...resp, decision, modelUsed: 'gemini-2.5-flash' };
     }
 
-    const resp = await geminiLiteService.generateResponse(message);
+    const resp = await geminiLiteService.generateResponse(message, {
+      historyText: memoryStore.getPlainHistory(8),
+    });
+    memoryStore.addAssistant(resp.content);
     return { ...resp, decision, modelUsed: 'gemini-2.5-flash-lite' };
   }
 }
