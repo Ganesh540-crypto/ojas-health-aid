@@ -1,6 +1,6 @@
 import { GoogleGenAI } from '@google/genai';
 
-const API_KEY = 'AIzaSyDGlcM72TRk56b-IeGzIqChhYHN3y5gPYw';
+const API_KEY = (import.meta as any).env?.VITE_GEMINI_API_KEY || '';
 
 const LITE_SYSTEM = `You are Ojas Lite, a friendly companion for casual and general conversations.
 - Be warm, concise, and helpful.
@@ -13,6 +13,9 @@ class GeminiLiteService {
   private model: string = 'gemini-2.5-flash-lite';
 
   constructor() {
+    if (!API_KEY) {
+      console.warn('Gemini API key missing: set VITE_GEMINI_API_KEY in your .env file');
+    }
     this.ai = new GoogleGenAI({ apiKey: API_KEY });
   }
 
