@@ -32,6 +32,19 @@ const ChatContainer = () => {
     scrollToBottom();
   }, [messages]);
 
+  // Quick-prompt integration from CommandDialog
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const detail = (e as CustomEvent<string>).detail;
+      if (typeof detail === 'string') {
+        // Prefill editor or immediately send a starter
+        setEditingMessage(detail + ' ');
+      }
+    };
+    window.addEventListener('oj-quick-prompt', handler as EventListener);
+    return () => window.removeEventListener('oj-quick-prompt', handler as EventListener);
+  }, []);
+
   const handleSendMessage = async (message: string, files?: File[]) => {
     let finalMessage = message;
     
