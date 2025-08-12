@@ -21,12 +21,18 @@ export class GoogleSearchService {
   private searchEngineId: string;
 
   constructor() {
-    // Using demo API key - in production, this should come from Supabase secrets
-    this.apiKey = 'AIzaSyBl0pHldOtJr2l0VmgLQpcWelQ9oJ8--E0';
-    this.searchEngineId = '748584bebb02646c9';
+    // Read from Vite env variables
+    this.apiKey = (import.meta as any).env?.VITE_GOOGLE_SEARCH_API_KEY || '';
+    this.searchEngineId = (import.meta as any).env?.VITE_GOOGLE_SEARCH_ENGINE_ID || '';
+    if (!this.apiKey || !this.searchEngineId) {
+      console.warn('Google Search env vars missing: VITE_GOOGLE_SEARCH_API_KEY or VITE_GOOGLE_SEARCH_ENGINE_ID');
+    }
   }
 
   async search(query: string, numResults: number = 5): Promise<GoogleSearchItem[]> {
+    if (!this.apiKey || !this.searchEngineId) {
+      return [];
+    }
     try {
       const response = await axios.get(
         `https://www.googleapis.com/customsearch/v1`,

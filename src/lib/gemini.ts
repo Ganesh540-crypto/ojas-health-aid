@@ -1,7 +1,8 @@
 import { GoogleGenAI, DynamicRetrievalConfigMode } from '@google/genai';
 import { googleSearchService } from './googleSearch';
+import { detectTone, isHealthRelated } from './textAnalysis';
 
-const API_KEY = 'AIzaSyDGlcM72TRk56b-IeGzIqChhYHN3y5gPYw';
+const API_KEY = (import.meta as any).env?.VITE_GEMINI_API_KEY || '';
 
 const SYSTEM_INSTRUCTIONS = `You are Ojas, a professional AI health companion and friendly assistant created by MedTrack (https://medtrack.co.in) under VISTORA TRAYANA LLP. You are designed to respond to general health queries and casual user interactions. Your behavior must strictly follow these guidelines:
 
@@ -40,26 +41,13 @@ export class GeminiService {
   private conversationMemory: string[] = [];
 
   constructor() {
-    this.ai = new GoogleGenAI({
-      apiKey: API_KEY,
-    });
+    if (!API_KEY) {
+      console.warn('Gemini API key missing: set VITE_GEMINI_API_KEY in your .env file');
+    }
+    this.ai = new GoogleGenAI({ apiKey: API_KEY });
   }
 
-  private isHealthRelated(message: string): boolean {
-    const healthKeywords = [
-      'health', 'pain', 'symptom', 'medicine', 'medication', 'doctor', 'hospital',
-      'injury', 'hurt', 'sick', 'fever', 'headache', 'stomach', 'chest',
-      'breathing', 'blood', 'pressure', 'diabetes', 'cancer', 'treatment',
-      'prescription', 'pill', 'drug', 'allergy', 'infection', 'virus',
-      'bacteria', 'disease', 'condition', 'diagnosis', 'therapy', 'surgery',
-      'emergency', 'urgent', 'serious', 'chronic', 'acute', 'prevention',
-      'wellness', 'fitness', 'diet', 'nutrition', 'exercise', 'sleep',
-      'mental health', 'anxiety', 'depression', 'stress', 'fatigue'
-    ];
-    
-    const lowerMessage = message.toLowerCase();
-    return healthKeywords.some(keyword => lowerMessage.includes(keyword));
-  }
+  private isHealthRelated(message: string): boolean { return isHealthRelated(message); }
 
   private shouldPerformWebSearch(message: string): boolean {
     const lowerMessage = message.toLowerCase();
@@ -84,19 +72,7 @@ export class GeminiService {
     return seriousKeywords.some(keyword => lowerMessage.includes(keyword));
   }
 
-  private detectTone(message: string): string {
-    const casual = /\b(hey|hi|yo|sup|what's up|whatsup|bro|dude|lol|haha|cool|awesome|nice|wassup|howdy)\b/i;
-    const romantic = /\b(love|heart|romantic|beautiful|gorgeous|sweetheart|darling|honey)\b/i;
-    const angry = /\b(angry|mad|frustrated|annoyed|pissed|hate|stupid|damn|wtf|fuck)\b/i;
-    const lazy = /\b(lazy|tired|sleepy|bored|meh|whatever|dunno|idk|can't be bothered)\b/i;
-    
-    if (angry.test(message)) return 'angry';
-    if (romantic.test(message)) return 'romantic';
-    if (lazy.test(message)) return 'lazy';
-    if (casual.test(message)) return 'casual';
-    
-    return 'neutral';
-  }
+  private detectTone(message: string): string { return detectTone(message); }
 
   private addToMemory(userMessage: string, response: string, isHealthRelated: boolean) {
     this.conversationHistory.push(

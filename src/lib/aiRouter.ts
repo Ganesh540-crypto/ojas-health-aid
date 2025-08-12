@@ -2,7 +2,7 @@ import { GoogleGenAI } from '@google/genai';
 import { geminiLiteService } from './geminiLite';
 import { geminiSearchService } from './geminiSearch';
 import { memoryStore } from './memory';
-const API_KEY = 'AIzaSyDGlcM72TRk56b-IeGzIqChhYHN3y5gPYw';
+const API_KEY = (import.meta as any).env?.VITE_GEMINI_API_KEY || '';
 
 type Decision = 'casual' | 'critical';
 
@@ -18,6 +18,9 @@ class AIRouter {
   private model: string = 'gemini-2.5-flash-lite';
 
   constructor() {
+    if (!API_KEY) {
+      console.warn('Gemini API key missing: set VITE_GEMINI_API_KEY in your .env file');
+    }
     this.ai = new GoogleGenAI({ apiKey: API_KEY });
   }
 
