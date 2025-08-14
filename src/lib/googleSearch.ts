@@ -1,6 +1,6 @@
 import axios from 'axios';
 
-interface GoogleSearchItem {
+export interface GoogleSearchItem {
   title: string;
   link: string;
   snippet: string;
@@ -22,8 +22,8 @@ export class GoogleSearchService {
 
   constructor() {
     // Read from Vite env variables
-    this.apiKey = (import.meta as any).env?.VITE_GOOGLE_SEARCH_API_KEY || '';
-    this.searchEngineId = (import.meta as any).env?.VITE_GOOGLE_SEARCH_ENGINE_ID || '';
+  this.apiKey = (import.meta.env?.VITE_GOOGLE_SEARCH_API_KEY as string) || '';
+  this.searchEngineId = (import.meta.env?.VITE_GOOGLE_SEARCH_ENGINE_ID as string) || '';
     if (!this.apiKey || !this.searchEngineId) {
       console.warn('Google Search env vars missing: VITE_GOOGLE_SEARCH_API_KEY or VITE_GOOGLE_SEARCH_ENGINE_ID');
     }
@@ -66,8 +66,8 @@ export class GoogleSearchService {
     return results
       .slice(0, 3) // Limit to top 3 results for context
       .map((item, index) => {
-        let domain = '';
-        try { domain = new URL(item.link).hostname.replace(/^www\./, ''); } catch {}
+  let domain = '';
+  try { domain = new URL(item.link).hostname.replace(/^www\./, ''); } catch { /* ignore URL parse errors */ }
         const snippet = (item.snippet || '').replace(/\s+/g, ' ').trim().slice(0, 220);
         return `**Source ${index + 1}:** [${item.title}](${item.link}) - ${domain}\n${snippet}`;
       })

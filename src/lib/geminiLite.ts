@@ -1,6 +1,7 @@
 import { GoogleGenAI } from '@google/genai';
+import { isHealthRelated } from '@/lib/textAnalysis';
 
-const API_KEY = (import.meta as any).env?.VITE_GEMINI_API_KEY || '';
+const API_KEY = (import.meta.env?.VITE_GEMINI_API_KEY as string) || '';
 
 const LITE_SYSTEM = `You are Ojas Lite, a friendly companion for casual and general conversations.
 - Be warm, concise, and helpful.
@@ -19,18 +20,7 @@ class GeminiLiteService {
     this.ai = new GoogleGenAI({ apiKey: API_KEY });
   }
 
-  private isHealthRelated(message: string): boolean {
-    const healthKeywords = [
-      'health','pain','symptom','medicine','medication','doctor','hospital',
-      'injury','hurt','sick','fever','headache','stomach','chest','breathing','blood',
-      'pressure','diabetes','cancer','treatment','prescription','pill','drug','allergy',
-      'infection','virus','bacteria','disease','condition','diagnosis','therapy','surgery',
-      'emergency','urgent','serious','chronic','acute','prevention','wellness','fitness',
-      'diet','nutrition','exercise','sleep','mental health','anxiety','depression','stress','fatigue'
-    ];
-    const lower = message.toLowerCase();
-    return healthKeywords.some(k => lower.includes(k));
-  }
+  private isHealthRelated(message: string): boolean { return isHealthRelated(message); }
 
   async generateResponse(message: string, options?: { historyText?: string }): Promise<{ content: string; isHealthRelated: boolean }>{
     const isHealth = this.isHealthRelated(message);

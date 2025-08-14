@@ -23,6 +23,11 @@ class MemoryStore {
     this.history = [];
   }
 
+  setHistory(messages: MemoryMessage[]) {
+    this.history = [...messages];
+    this.trim();
+  }
+
   // Keep last 10 exchanges (20 messages)
   private trim() {
     const max = 20;

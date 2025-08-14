@@ -60,6 +60,32 @@ This project is built with:
 - shadcn-ui
 - Tailwind CSS
 
+## Firebase Realtime Database rules (fix PERMISSION_DENIED)
+
+If you see PERMISSION_DENIED when saving profile or chats, set RTDB rules so users can only read/write their own data:
+
+Files included:
+
+- `firebase.json`
+- `database.rules.json`
+
+Rules grant access to `users/$uid/**` only to the authenticated user with the same uid. Deploy them with the Firebase CLI:
+
+1) Install Firebase CLI and initialize login once
+
+	npm install -g firebase-tools
+	firebase login
+
+2) Set your default project (replace with your Firebase project ID)
+
+	firebase use <your-project-id>
+
+3) Deploy database rules from this repo root
+
+	firebase deploy --only database
+
+Make sure your app uses the same project in `.env` VITE_FIREBASE_* values.
+
 ## How can I deploy this project?
 
 Simply open [Lovable](https://lovable.dev/projects/79636bec-bc40-4aba-8e70-979fe8ed8762) and click on Share -> Publish.

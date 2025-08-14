@@ -1,9 +1,13 @@
 import { useState, useRef, useEffect } from "react";
+import { useParams, useNavigate } from "react-router-dom";
 import ChatHeader from "./ChatHeader";
 import ChatMessage from "./ChatMessage";
 import ChatInput from "./ChatInput";
 import WelcomeScreen from "./WelcomeScreen";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { chatStore } from "@/lib/chatStore";
+import { memoryStore, type MemoryMessage } from "@/lib/memory";
+import { auth } from "@/lib/firebase";
 
 interface Message {
   id: string;
@@ -14,6 +18,8 @@ interface Message {
 }
 
 const ChatContainer = () => {
+  const { chatId } = useParams<{ chatId: string }>();
+  const navigate = useNavigate();
   const [messages, setMessages] = useState<Message[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [editingMessage, setEditingMessage] = useState<string>("");
@@ -31,6 +37,25 @@ const ChatContainer = () => {
   useEffect(() => {
     scrollToBottom();
   }, [messages]);
+
+  // Load chat history for this chatId and sync memory
+  useEffect(() => {
+    if (!auth.currentUser) {
+      navigate('/login', { replace: true });
+      return;
+    }
+    if (!chatId) return;
+    const chat = chatStore.get(chatId) || chatStore.create();
+    const mapped: Message[] = chat.messages.map(m => ({
+      id: m.id,
+      content: m.content,
+      isBot: m.role === 'assistant',
+      timestamp: new Date(m.timestamp),
+    }));
+    setMessages(mapped);
+    const mem: MemoryMessage[] = chat.messages.map(m => ({ role: m.role, content: m.content, timestamp: m.timestamp }));
+    memoryStore.setHistory(mem);
+  }, [chatId, navigate]);
 
   // Quick-prompt integration from CommandDialog
   useEffect(() => {
@@ -76,7 +101,7 @@ const ChatContainer = () => {
       return;
     }
 
-    const userMessage: Message = {
+  const userMessage: Message = {
       id: Date.now().toString(),
       content: finalMessage,
       isBot: false,
@@ -84,13 +109,15 @@ const ChatContainer = () => {
     };
 
     setMessages(prev => [...prev, userMessage]);
+    if (chatId) {
+      chatStore.addMessage(chatId, 'user', finalMessage);
+    }
     setIsLoading(true);
-
     try {
       const { aiRouter } = await import('@/lib/aiRouter');
       const response = await aiRouter.route(finalMessage);
 
-      const botMessage: Message = {
+  const botMessage: Message = {
         id: (Date.now() + 1).toString(),
         content: response.content,
         isBot: true,
@@ -99,8 +126,8 @@ const ChatContainer = () => {
       };
 
       setMessages(prev => [...prev, botMessage]);
+      if (chatId) chatStore.addMessage(chatId, 'assistant', response.content);
     } catch (error) {
-      console.error('Error generating response:', error);
       const errorMessage: Message = {
         id: (Date.now() + 1).toString(),
         content: "I apologize, but I encountered an error while processing your request. Please try again.",
@@ -109,6 +136,7 @@ const ChatContainer = () => {
         healthRelated: false
       };
       setMessages(prev => [...prev, errorMessage]);
+      if (chatId) chatStore.addMessage(chatId, 'assistant', errorMessage.content);
     } finally {
       setIsLoading(false);
     }
@@ -126,12 +154,12 @@ const ChatContainer = () => {
     <div className="h-screen flex flex-col bg-background">
       <ChatHeader />
       
-      <div className="flex-1 overflow-hidden">
+  <div className="flex-1 overflow-hidden">
         {messages.length === 0 ? (
           <WelcomeScreen onSendMessage={handleSendMessage} />
         ) : (
           <ScrollArea className="h-full" ref={scrollAreaRef}>
-            <div className="min-h-full max-w-4xl mx-auto px-6 py-8">
+    <div className="min-h-full max-w-3xl mx-auto px-6 py-6">
               {messages.map((message) => (
                 <ChatMessage
                   key={message.id}

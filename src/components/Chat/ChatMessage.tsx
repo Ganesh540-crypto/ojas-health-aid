@@ -8,7 +8,6 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/comp
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
-import { Separator } from "@/components/ui/separator";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 
@@ -23,13 +22,16 @@ interface ChatMessageProps {
 
 const ChatMessage = ({ message, isBot, timestamp, isThinking, healthRelated, onEdit }: ChatMessageProps) => {
   return (
-    <div className="px-4 py-3">
+  <div className="px-2 py-2">
       <div className="flex items-start gap-3">
         <Avatar className="h-8 w-8">
-          <AvatarFallback className={cn(isBot ? "bg-primary text-primary-foreground" : "bg-accent text-accent-foreground")}
-          >
-            {isBot ? <Brain className="w-4 h-4" /> : <User className="w-4 h-4" />}
-          </AvatarFallback>
+          {isBot ? (
+            <img src="/logo-jas.svg" alt="Ojas logo" className="h-8 w-8 p-1" />
+          ) : (
+            <AvatarFallback className="bg-accent text-accent-foreground">
+              <User className="w-4 h-4" />
+            </AvatarFallback>
+          )}
         </Avatar>
 
         <div className="flex-1 min-w-0">
@@ -66,7 +68,7 @@ const ChatMessage = ({ message, isBot, timestamp, isThinking, healthRelated, onE
             )}
           </div>
 
-          <Card className={cn(isBot ? "bg-background" : "bg-muted/30 border-muted/60")}
+          <Card className={cn("border border-border shadow-sm", isBot ? "bg-card" : "bg-background")}
           >
             <CardContent className="p-4">
               {isThinking ? (
@@ -75,7 +77,7 @@ const ChatMessage = ({ message, isBot, timestamp, isThinking, healthRelated, onE
                   <Skeleton className="h-4 w-1/2" />
                 </div>
               ) : (
-                <div className="prose prose-invert max-w-none">
+                <div className="prose max-w-none">
                   <ReactMarkdown
                     remarkPlugins={[remarkGfm]}
                     components={{
@@ -122,13 +124,8 @@ const ChatMessage = ({ message, isBot, timestamp, isThinking, healthRelated, onE
           )}
         </div>
 
-        {!isBot && (
-          <div className="flex items-end">
-            <Check className="w-4 h-4 text-success" />
-          </div>
-        )}
+  {!isBot && <div className="flex items-end" />}
       </div>
-      <Separator className="mt-3" />
     </div>
   );
 };

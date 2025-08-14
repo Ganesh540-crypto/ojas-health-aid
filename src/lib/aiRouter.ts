@@ -2,7 +2,8 @@ import { GoogleGenAI } from '@google/genai';
 import { geminiLiteService } from './geminiLite';
 import { geminiSearchService } from './geminiSearch';
 import { memoryStore } from './memory';
-const API_KEY = (import.meta as any).env?.VITE_GEMINI_API_KEY || '';
+import { profileStore } from './profileStore';
+const API_KEY: string = (import.meta.env?.VITE_GEMINI_API_KEY as string) || '';
 
 type Decision = 'casual' | 'critical';
 
@@ -38,7 +39,11 @@ class AIRouter {
 
   private async classify(message: string): Promise<Decision> {
     try {
-      const prompt = `Classify the user message strictly as JSON with keys decision and reason.\n- decision must be one of: \"casual\" or \"critical\".\n- Use \"critical\" if the message is health-related, asks for research, sources, prices, comparisons, market info, or seems important/needs careful guidance; otherwise \"casual\".\nReturn JSON only.\nMessage: ${message}`;
+  const prompt = `Classify the user message strictly as JSON with keys decision and reason.
+- decision must be one of: "casual" or "critical".
+- Use "critical" if the message is health-related, asks for research, sources, prices, comparisons, market info, or seems important/needs careful guidance; otherwise "casual".
+Return JSON only.
+Message: ${message}`;
 
       const stream = await this.ai.models.generateContentStream({
         model: this.model,
@@ -67,18 +72,26 @@ class AIRouter {
   async route(message: string): Promise<RouteResult> {
     // Record user message in shared memory
     memoryStore.addUser(message);
+    const profile = profileStore.get();
+    const profileSummary = Object.keys(profile).length
+      ? `USER PROFILE\nName: ${profile.name ?? ''}\nAge: ${profile.age ?? ''}\nHeight(cm): ${profile.heightCm ?? ''}\nWeight(kg): ${profile.weightKg ?? ''}\nAllergies: ${(profile.allergies || []).join(', ')}\nConditions: ${(profile.preexisting || []).join(', ')}\nMeds: ${(profile.medications || []).join(', ')}`
+      : '';
 
     const decision = await this.classify(message);
 
     if (decision === 'critical') {
       // Rephrase and enrich the query for better research
       const rewritten = await geminiLiteService.rephraseForResearch(message, {
-        historyText: memoryStore.getPlainHistory(8),
+        historyText: [profileSummary, memoryStore.getPlainHistory(8)].filter(Boolean).join('\n\n'),
       });
 
       const resp = await geminiSearchService.generateResponse(rewritten, {
         forceSearch: true,
-        historyParts: memoryStore.getHistoryParts(),
+        historyParts: (
+          profileSummary
+            ? [{ role: 'user', parts: [{ text: profileSummary }] }, ...memoryStore.getHistoryParts()]
+            : memoryStore.getHistoryParts()
+        ),
         originalMessage: message,
         rewrittenQuery: rewritten,
       });
@@ -89,7 +102,7 @@ class AIRouter {
     }
 
     const resp = await geminiLiteService.generateResponse(message, {
-      historyText: memoryStore.getPlainHistory(8),
+      historyText: [profileSummary, memoryStore.getPlainHistory(8)].filter(Boolean).join('\n\n'),
     });
     memoryStore.addAssistant(resp.content);
     return { ...resp, decision, modelUsed: 'gemini-2.5-flash-lite' };

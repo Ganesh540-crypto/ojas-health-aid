@@ -80,8 +80,8 @@ const ChatInput = ({ onSendMessage, isLoading, editMessage, onCancelEdit }: Chat
   };
 
   return (
-    <div className="border-t border-border bg-background p-4">
-      <form onSubmit={handleSubmit} className="space-y-4">
+  <div className="border-t border-border bg-background px-6 py-4">
+      <form onSubmit={handleSubmit} className="space-y-3 max-w-4xl mx-auto">
         {files.length > 0 && (
           <div className="flex gap-2 flex-wrap">
             {files.map((file, index) => (
@@ -118,10 +118,10 @@ const ChatInput = ({ onSendMessage, isLoading, editMessage, onCancelEdit }: Chat
               onChange={(e) => setMessage(e.target.value)}
               onKeyDown={handleKeyPress}
               placeholder="Type your message here..."
-              className="min-h-[60px] resize-none pr-24"
+              className="min-h-[56px] resize-none pr-28 rounded-2xl border-border bg-background"
               disabled={isLoading}
             />
-            <div className="absolute right-2 bottom-2 flex gap-1">
+            <div className="absolute right-2 bottom-2 flex gap-2">
               <Button
                 type="button"
                 variant="ghost"
@@ -151,9 +151,9 @@ const ChatInput = ({ onSendMessage, isLoading, editMessage, onCancelEdit }: Chat
               </Button>
               <Button
                 type="submit"
-                variant="ghost"
+                variant="secondary"
                 size="sm"
-                className="h-8 w-8 p-0"
+                className="h-8 w-8 p-0 rounded-full"
                 disabled={isLoading || !message.trim()}
               >
                 {isLoading ? (
@@ -165,10 +165,8 @@ const ChatInput = ({ onSendMessage, isLoading, editMessage, onCancelEdit }: Chat
             </div>
           </div>
         </div>
-        <div className="flex items-center justify-center">
-          <p className="text-xs text-muted-foreground">
-            ⚠️ AI can make mistakes. Consider checking important information.
-          </p>
+        <div className="flex items-center justify-end">
+          <p className="text-xs text-muted-foreground">3 prompts left</p>
         </div>
       </form>
     </div>

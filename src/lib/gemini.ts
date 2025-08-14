@@ -1,8 +1,8 @@
 import { GoogleGenAI, DynamicRetrievalConfigMode } from '@google/genai';
-import { googleSearchService } from './googleSearch';
+import { googleSearchService, type GoogleSearchItem } from './googleSearch';
 import { detectTone, isHealthRelated } from './textAnalysis';
 
-const API_KEY = (import.meta as any).env?.VITE_GEMINI_API_KEY || '';
+const API_KEY = (import.meta.env?.VITE_GEMINI_API_KEY as string) || '';
 
 const SYSTEM_INSTRUCTIONS = `You are Ojas, a professional AI health companion and friendly assistant created by MedTrack (https://medtrack.co.in) under VISTORA TRAYANA LLP. You are designed to respond to general health queries and casual user interactions. Your behavior must strictly follow these guidelines:
 
@@ -144,7 +144,7 @@ export class GeminiService {
 
         const candidates = productLike ? [ecommerceFilter, plainQuery, evidenceFilter] : [evidenceFilter, plainQuery];
 
-        let searchResults: any[] = [];
+  let searchResults: GoogleSearchItem[] = [];
         for (const q of candidates) {
           const r = await googleSearchService.search(q, 5);
           if (r.length > 0) { searchResults = r; break; }
@@ -160,9 +160,8 @@ export class GeminiService {
         }
       }
 
-      const config = {
+  const config = {
         systemInstruction: enhancedInstructions,
-        tools: [] as any[],
         ...(isImportantHealth && {
           thinkingConfig: {
             thinkingBudget: -1,
@@ -175,7 +174,7 @@ export class GeminiService {
         ? options.historyParts.slice(-6)
         : this.conversationHistory.slice(-6);
 
-      const contents: Array<{ role: string; parts: { text: string }[] }> = [
+  const contents: Array<{ role: string; parts: { text: string }[] }> = [
         ...history,
       ];
 
