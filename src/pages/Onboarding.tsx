@@ -34,23 +34,19 @@ export default function Onboarding() {
         nav('/login', { replace: true });
         return;
       }
-      // Try hydrate from RTDB first
       try {
         const snap = await get(child(ref(db), `users/${u.uid}/profile`));
         if (snap.exists()) {
-          const data = snap.val() as ProfileWithAvatar;
-          setProfile({ ...data });
-          if (data.avatar) setSelectedAvatar(data.avatar);
-        } else {
-          // fallback to local
-          const local = profileStore.get();
-          setProfile({ ...local, name: u.displayName || local.name, email: u.email || local.email });
+          // Profile already completed -> skip onboarding entirely
+            nav('/', { replace: true });
+            return;
         }
       } catch (e) {
-        console.warn('Onboarding hydrate failed', e);
-        const local = profileStore.get();
-        setProfile({ ...local, name: u?.displayName || local.name, email: u?.email || local.email });
+        // ignore fetch failure; fall through to local fallback
       }
+      // Fallback: prefill from local / auth display
+      const local = profileStore.get();
+      setProfile({ ...local, name: u.displayName || local.name, email: u.email || local.email });
     });
     return () => sub();
   }, [nav]);

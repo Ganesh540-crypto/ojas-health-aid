@@ -3,11 +3,10 @@ import { Separator } from "@/components/ui/separator";
 
 const ChatHeader = () => {
   return (
-    <div className="bg-background/80 backdrop-blur-sm">
-      <div className="max-w-7xl mx-auto px-6 py-3">
-        {/* Intentionally empty title; branding moved to sidebar top */}
+    <div className="bg-transparent">
+      <div className="max-w-4xl mx-auto px-10 pt-8 pb-4">
+        {/* Space reserved for future chat header controls */}
       </div>
-      <Separator />
     </div>
   );
 };

@@ -25,9 +25,9 @@ export default function RequireProfile({ children }: { children: JSX.Element }) 
     return () => unsub();
   }, []);
 
-  if (user === undefined) return null; // loading auth
+  if (user === undefined) return <div className="min-h-screen flex items-center justify-center text-sm text-muted-foreground">Loading…</div>;
   if (!user) return <Navigate to="/login" replace />;
-  if (profileExists === undefined) return null; // checking profile
+  if (profileExists === undefined) return <div className="min-h-screen flex items-center justify-center text-sm text-muted-foreground">Loading profile…</div>;
   if (!profileExists) return <Navigate to="/onboarding" replace />;
   return children;
 }

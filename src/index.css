@@ -69,7 +69,20 @@
   --sidebar-accent-foreground: 224 31% 20%;
   --sidebar-border: 220 13% 90%;
   --sidebar-ring: var(--ring);
+
+  /* Accent options (switchable via data-accent on :root) */
+  --accent-orange: 20 90% 52%;
+  --accent-blue: 212 92% 50%;
+  --accent-green: 142 70% 45%;
   }
+
+  /* Accent switching */
+  :root[data-accent="blue"] { --primary: var(--accent-blue); }
+  :root[data-accent="green"] { --primary: var(--accent-green); }
+  :root[data-accent="orange"] { --primary: var(--accent-orange); }
+
+  /* Density switching */
+  :root[data-compact="1"] .compact\:h-8 { height: 2rem !important; }
 
 }
 

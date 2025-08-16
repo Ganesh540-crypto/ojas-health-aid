@@ -32,8 +32,18 @@ const Index = () => {
             console.warn('Profile check failed', e);
           }
         }
-        const chat = chatStore.create();
-        navigate(`/chat/${chat.id}`, { replace: true });
+        // Hydrate from cloud first if we have user and no cached chats yet.
+        let list = chatStore.list();
+        if (auth.currentUser && list.length === 0) {
+          try { await chatStore.hydrateFromCloud(); } catch (e) { /* ignore */ }
+          list = chatStore.list();
+        }
+        if (list.length > 0) {
+          navigate(`/chat/${list[0].id}`, { replace: true });
+        } else {
+          const c = chatStore.create();
+          navigate(`/chat/${c.id}`, { replace: true });
+        }
       }
     })();
   }, [location.pathname, navigate]);

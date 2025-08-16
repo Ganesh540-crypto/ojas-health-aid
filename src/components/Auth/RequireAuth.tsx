@@ -23,7 +23,7 @@ export default function RequireAuth({ children }: { children: JSX.Element }) {
     };
     check();
   }, []);
-  if (user === undefined) return null; // TODO: optional spinner
+  if (user === undefined) return <div className="min-h-screen flex items-center justify-center text-sm text-muted-foreground">Checking session…</div>;
   if (!user) return <Navigate to="/login" replace />;
   return children;
 }
