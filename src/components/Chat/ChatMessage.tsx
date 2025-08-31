@@ -1,7 +1,7 @@
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { cn } from "@/lib/utils";
-import { User, Edit3, ExternalLink } from "lucide-react";
+import { User, Edit3, ExternalLink, Volume2 } from "lucide-react";
 import { format } from "date-fns";
 import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
@@ -21,7 +21,36 @@ interface ChatMessageProps {
   className?: string; // for parent-controlled scaling
 }
 
+import { synthesizeSpeech, speakSmart } from '@/lib/tts';
+import { useState } from 'react';
+
 const ChatMessage = ({ message, isBot, timestamp, isThinking, healthRelated, onEdit, userAvatar, className }: ChatMessageProps) => {
+  const [isSpeaking, setIsSpeaking] = useState(false);
+  const [audioUrl, setAudioUrl] = useState<string | null>(null);
+  const [usedFallback, setUsedFallback] = useState(false);
+
+  const handleSpeak = async () => {
+    if (isSpeaking) return;
+    setIsSpeaking(true);
+    try {
+      if (!audioUrl) {
+  const url = await synthesizeSpeech(message, { speakingRate: 1, pitch: 0 });
+        if (url) {
+          setAudioUrl(url);
+          const audio = new Audio(url);
+          audio.onended = () => setIsSpeaking(false);
+          await audio.play();
+          return;
+        }
+      }
+      // Fallback
+      const ok = await speakSmart(message);
+      if (!ok) setUsedFallback(true);
+      setTimeout(() => setIsSpeaking(false), 500); // approximate end for web speech
+    } catch {
+      setIsSpeaking(false);
+    }
+  };
   return (
   <div className={cn("px-0 py-2", className)}>
       <div className={cn("flex w-full gap-3", isBot ? "justify-start" : "justify-end")}>        
@@ -56,6 +85,17 @@ const ChatMessage = ({ message, isBot, timestamp, isThinking, healthRelated, onE
                   </TooltipContent>
                 </Tooltip>
               </TooltipProvider>
+            )}
+            {isBot && !isThinking && (
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={handleSpeak}
+                className="h-5 w-5 p-0"
+                title="Read aloud"
+              >
+                <Volume2 className={cn("h-3 w-3", isSpeaking && 'animate-pulse')} />
+              </Button>
             )}
             {!isBot && onEdit && (
               <Button
@@ -110,6 +150,9 @@ const ChatMessage = ({ message, isBot, timestamp, isThinking, healthRelated, onE
                 </div>
               )}
           </div>
+          {usedFallback && (
+            <div className="mt-2 text-[10px] text-muted-foreground">Browser speech fallback used.</div>
+          )}
           {isBot && healthRelated && !isThinking && (
             <div className="mt-2">
               <Alert>

@@ -16,4 +16,7 @@ const firebaseConfig = {
 export const firebaseApp = initializeApp(firebaseConfig);
 export const auth = getAuth(firebaseApp);
 export const googleProvider = new GoogleAuthProvider();
+if (!firebaseConfig.databaseURL) {
+  console.warn('Firebase Realtime Database URL (VITE_FIREBASE_DATABASE_URL) is missing. Cloud chat sync will fail.');
+}
 export const db = getDatabase(firebaseApp);

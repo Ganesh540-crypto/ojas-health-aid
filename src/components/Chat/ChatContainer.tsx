@@ -8,6 +8,7 @@ import ChatInput from "./ChatInput";
 import WelcomeScreen from "./WelcomeScreen";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { chatStore } from "@/lib/chatStore";
+import type { HealthIntakePayload, HealthIntakeQuestion } from '@/lib/healthIntake';
 import { memoryStore, type MemoryMessage } from "@/lib/memory";
 import { auth } from "@/lib/firebase";
 import { profileStore } from "@/lib/profileStore";
@@ -32,7 +33,11 @@ const ChatContainer = () => {
   const [speed, setSpeed] = useState<number>(25);
   const [editingMessage, setEditingMessage] = useState<string>("");
   const [profile, setProfile] = useState(() => profileStore.get());
+  const [intake, setIntake] = useState<HealthIntakePayload | null>(null);
+  const [intakeAnswers, setIntakeAnswers] = useState<Record<string,string>>({});
+  const [awaitingIntake, setAwaitingIntake] = useState(false);
   const scrollAreaRef = useRef<HTMLDivElement>(null);
+  const [intakeIndex, setIntakeIndex] = useState(0);
 
   const scrollToBottom = (smooth = true) => {
     if (scrollAreaRef.current) {
@@ -101,6 +106,7 @@ const ChatContainer = () => {
         content: m.content,
         isBot: m.role === 'assistant',
         timestamp: new Date(m.timestamp),
+        healthRelated: typeof m.healthRelated === 'boolean' ? m.healthRelated : false,
       }));
       setMessages(mapped);
       const mem: MemoryMessage[] = chat.messages.map(m => ({ role: m.role, content: m.content, timestamp: m.timestamp }));
@@ -125,6 +131,16 @@ const ChatContainer = () => {
   }, []);
 
   const handleSendMessage = async (message: string, files?: File[]) => {
+    // If currently in intake mode and user typed free-form, treat as final answers
+    if (awaitingIntake && intake) {
+      const packaged = { intakeAnswers: { freeform: message, structured: intakeAnswers } };
+      const jsonPayload = JSON.stringify(packaged, null, 2);
+  setAwaitingIntake(false);
+  setIntake(null);
+  setIntakeAnswers({});
+  // Send answers to AI without adding a user-visible message
+  return submitIntake(jsonPayload);
+    }
     let finalMessage = message;
     
     // Handle file uploads by adding file descriptions to message
@@ -165,14 +181,27 @@ const ChatContainer = () => {
     setMessages(prev => [...prev, userMessage]);
     if (chatId) {
       chatStore.addMessage(chatId, 'user', finalMessage);
+  chatStore.pushToCloud();
     }
     setIsLoading(true);
     try {
       const { aiRouter } = await import('@/lib/aiRouter');
       const response = await aiRouter.route(finalMessage);
+      // If router returned intake questions, open carousel UI and DO NOT insert the interim notice into chat history.
+      if (response.intake && response.awaitingIntakeAnswers) {
+        setIntake(response.intake);
+        setAwaitingIntake(true);
+        setIsLoading(false);
+        return;
+      }
       // Streaming / typewriter effect
       const full = response.content;
-      const botId = (Date.now() + 1).toString();
+      // Persist an assistant placeholder message with healthRelated flag so it survives refresh
+      let botMessageId: string | undefined;
+      if (chatId) {
+        botMessageId = chatStore.addMessageWithId(chatId, 'assistant', '', { healthRelated: response.isHealthRelated });
+      }
+      const botId = botMessageId || (Date.now() + 1).toString();
       const botMessage: Message = {
         id: botId,
         content: "",
@@ -189,15 +218,22 @@ const ChatContainer = () => {
         i += chunk;
         setMessages(prev => prev.map(m => m.id === botId ? { ...m, content: full.slice(0, i) } : m));
         if (scrollLocked) scrollToBottom(true);
-        if (chatId) chatStore.updateMessage(chatId, botId, full.slice(0, i));
+        if (chatId && botMessageId) chatStore.updateMessage(chatId, botId, full.slice(0, i));
         if (i >= full.length) {
           clearInterval(interval);
-          if (chatId) chatStore.addMessage(chatId, 'assistant', full);
+          if (chatId && !botMessageId) chatStore.addMessage(chatId, 'assistant', full);
+          // If we have a persisted placeholder, finalize it by updating content
+          if (chatId && botMessageId) chatStore.updateMessage(chatId, botId, full);
+          // Ensure cloud gets the finalized content
+          if (chatId) chatStore.pushToCloud();
           setStreamController(null);
           setIsLoading(false);
         }
       }, 25);
-      setStreamController({ stop: () => { stopped = true; clearInterval(interval); setStreamController(null); setIsLoading(false); if (chatId) chatStore.addMessage(chatId, 'assistant', full.slice(0, i)); } });
+      setStreamController({ stop: () => { stopped = true; clearInterval(interval); setStreamController(null); setIsLoading(false); if (chatId) {
+        if (botMessageId) chatStore.updateMessage(chatId, botId, full.slice(0, i)); else chatStore.addMessage(chatId, 'assistant', full.slice(0, i));
+        chatStore.pushToCloud();
+      } } });
     } catch (error) {
       const errorMessage: Message = {
         id: (Date.now() + 1).toString(),
@@ -210,6 +246,69 @@ const ChatContainer = () => {
       if (chatId) chatStore.addMessage(chatId, 'assistant', errorMessage.content);
     } finally {
   if (!streamController) setIsLoading(false);
+    }
+  };
+
+  // Hidden submit path for intake answers: does NOT add a user message; streams assistant reply
+  const submitIntake = async (jsonPayload: string) => {
+    setIsLoading(true);
+    try {
+      const { aiRouter } = await import('@/lib/aiRouter');
+      const response = await aiRouter.route(jsonPayload);
+      if (response.intake && response.awaitingIntakeAnswers) {
+        setIntake(response.intake);
+        setAwaitingIntake(true);
+        setIsLoading(false);
+        return;
+      }
+      const full = response.content;
+      let botMessageId: string | undefined;
+      if (chatId) {
+        botMessageId = chatStore.addMessageWithId(chatId, 'assistant', '', { healthRelated: response.isHealthRelated });
+      }
+      const botId = botMessageId || (Date.now() + 1).toString();
+      const botMessage: Message = {
+        id: botId,
+        content: "",
+        isBot: true,
+        timestamp: new Date(),
+        healthRelated: response.isHealthRelated
+      };
+      setMessages(prev => [...prev, botMessage]);
+      let i = 0;
+      const chunk = Math.max(1, Math.round(full.length / (800 / speed)));
+      let stopped = false;
+      const interval = setInterval(() => {
+        if (stopped) return;
+        i += chunk;
+        setMessages(prev => prev.map(m => m.id === botId ? { ...m, content: full.slice(0, i) } : m));
+        if (scrollLocked) scrollToBottom(true);
+        if (chatId && botMessageId) chatStore.updateMessage(chatId, botId, full.slice(0, i));
+        if (i >= full.length) {
+          clearInterval(interval);
+          if (chatId && !botMessageId) chatStore.addMessage(chatId, 'assistant', full);
+          if (chatId && botMessageId) chatStore.updateMessage(chatId, botId, full);
+          if (chatId) chatStore.pushToCloud();
+          setStreamController(null);
+          setIsLoading(false);
+        }
+      }, 25);
+      setStreamController({ stop: () => { stopped = true; clearInterval(interval); setStreamController(null); setIsLoading(false); if (chatId) {
+        if (botMessageId) chatStore.updateMessage(chatId, botId, full.slice(0, i)); else chatStore.addMessage(chatId, 'assistant', full.slice(0, i));
+        chatStore.pushToCloud();
+      } } });
+    } catch (error) {
+      const errorMessage: Message = {
+        id: (Date.now() + 1).toString(),
+        content: "I apologize, but I encountered an error while processing your request. Please try again.",
+        isBot: true,
+        timestamp: new Date(),
+        healthRelated: false
+      };
+      setMessages(prev => [...prev, errorMessage]);
+      if (chatId) chatStore.addMessage(chatId, 'assistant', errorMessage.content);
+    } finally {
+      if (!streamController) setIsLoading(false);
     }
   };
 
@@ -272,6 +371,101 @@ const ChatContainer = () => {
           onStopGeneration={streamController?.stop}
           chatId={chatId || undefined}
         />
+        {awaitingIntake && intake && (
+          <div className="fixed inset-0 z-40 flex items-center justify-center">
+            <div className="absolute inset-0 bg-black/40" />
+            <div className="relative w-full max-w-2xl p-6">
+              <div className="bg-background rounded-lg p-6 shadow-lg">
+                <div className="flex items-center justify-between mb-3">
+                  <h3 className="text-lg font-semibold">Health Details</h3>
+                  <span className="text-xs text-muted-foreground">
+                    {(() => {
+                      const total = (intake?.questions?.length ?? 0) + 1;
+                      const current = Math.min(intakeIndex + 1, total);
+                      return `${current}/${total}`;
+                    })()}
+                  </span>
+                </div>
+                <p className="text-sm text-muted-foreground mb-4">Answer the questions below to personalize safe guidance. You can select an option or type an answer. Use the final card to add extra conditions.</p>
+                <div className="min-h-[140px]">
+                  {intake.questions.length > 0 && intakeIndex < intake.questions.length ? (
+                    (() => {
+                      const q = intake.questions[intakeIndex];
+                      return (
+                        <div key={q.id} className="rounded-lg border bg-background p-4 space-y-3">
+                          <p className="font-medium">{q.text}</p>
+                          {Array.isArray(q.options) && q.options.length > 0 && (
+                            <div className="flex flex-wrap gap-2">
+                              {q.options.map(opt => {
+                                const active = intakeAnswers[q.id] === opt;
+                                return (
+                                  <button
+                                    key={opt}
+                                    onClick={() => setIntakeAnswers(a => ({ ...a, [q.id]: opt }))}
+                                    className={`px-3 py-1 rounded text-sm border transition ${active ? 'bg-primary text-primary-foreground border-primary' : 'hover:bg-muted'}`}
+                                  >{opt}</button>
+                                );
+                              })}
+                            </div>
+                          )}
+                          <input
+                            className="w-full px-3 py-2 text-sm rounded border bg-background"
+                            placeholder="Type answer (or pick an option above)..."
+                            value={intakeAnswers[q.id] || ''}
+                            onChange={e => setIntakeAnswers(a => ({ ...a, [q.id]: e.target.value }))}
+                          />
+                        </div>
+                      );
+                    })()
+                  ) : (
+                    <div className="rounded-lg border bg-background p-4 space-y-3">
+                      <p className="font-medium">Any additional conditions or details?</p>
+                      <textarea
+                        className="w-full h-28 px-3 py-2 text-sm rounded border bg-background"
+                        placeholder="Enter any other symptoms, allergies, medications, or context..."
+                        value={intakeAnswers['__extra'] || ''}
+                        onChange={e => setIntakeAnswers(a => ({ ...a, ['__extra']: e.target.value }))}
+                      />
+                    </div>
+                  )}
+                </div>
+                <div className="flex items-center justify-between gap-3 mt-4">
+                  <div className="flex gap-2">
+                    <button
+                      onClick={() => { if (intakeIndex > 0) setIntakeIndex(i => i - 1); }}
+                      className="px-3 py-1.5 rounded-md border text-sm"
+                      disabled={intakeIndex === 0}
+                    >Back</button>
+                    {intakeIndex < intake.questions.length ? (
+                      <button
+                        onClick={() => { setIntakeIndex(i => Math.min(i + 1, intake.questions.length)); }}
+                        className="px-3 py-1.5 rounded-md bg-primary text-primary-foreground text-sm"
+                      >Next</button>
+                    ) : (
+                      <button
+                        onClick={() => {
+                          const jsonPayload = JSON.stringify({ intakeAnswers }, null, 2);
+                          setAwaitingIntake(false);
+                          setIntake(null);
+                          setIntakeAnswers({});
+                          setIntakeIndex(0);
+                          setTimeout(() => submitIntake(jsonPayload), 0);
+                        }}
+                        className="px-3 py-1.5 rounded-md bg-primary text-primary-foreground text-sm"
+                      >Submit All</button>
+                    )}
+                  </div>
+                  <div className="text-sm">
+                    <button
+                      onClick={() => { setAwaitingIntake(false); setIntake(null); setIntakeAnswers({}); setIntakeIndex(0); }}
+                      className="px-3 py-1.5 rounded-md border text-sm"
+                    >I'll type instead above</button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );

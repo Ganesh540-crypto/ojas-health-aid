@@ -5,6 +5,7 @@ export interface ChatMessageItem {
   role: ChatMessageRole;
   content: string;
   timestamp: number;
+  healthRelated?: boolean;
 }
 
 export interface Chat {
@@ -38,7 +39,7 @@ function loadAll(): Chat[] {
   try {
     const raw = localStorage.getItem(LS_KEY);
     if (!raw) return [];
-    const parsed = JSON.parse(raw);
+  const parsed = JSON.parse(raw);
     if (!Array.isArray(parsed)) return [];
     // Sanitize each chat object to avoid runtime errors
     const cleaned: Chat[] = [];
@@ -46,9 +47,48 @@ function loadAll(): Chat[] {
       if (!item || typeof item !== 'object') continue;
       const { id, title, createdAt, updatedAt, messages, ephemeral } = item as Partial<Chat> & { messages?: unknown };
       if (typeof id !== 'string') continue;
-      const safeMessages: ChatMessageItem[] = Array.isArray(messages)
-        ? (messages.filter(m => m && typeof m === 'object' && typeof m.id === 'string' && typeof m.role === 'string' && typeof m.content === 'string' && typeof m.timestamp === 'number') as ChatMessageItem[])
-        : [];
+      type RawMessage = {
+        id?: unknown;
+        role?: unknown;
+        content?: unknown;
+        timestamp?: unknown;
+        healthRelated?: unknown;
+      };
+      const isValidRawMessage = (
+        m: unknown
+      ): m is {
+        id: string;
+        role: ChatMessageRole;
+        content: string;
+        timestamp: number;
+        healthRelated?: unknown;
+      } => {
+        if (!m || typeof m !== 'object') return false;
+        const r = m as RawMessage;
+        const role = r.role;
+        const roleOk = role === 'user' || role === 'assistant';
+        return (
+          typeof r.id === 'string' &&
+          roleOk &&
+          typeof r.content === 'string' &&
+          typeof r.timestamp === 'number'
+        );
+      };
+      const rawMsgs: unknown[] = Array.isArray(messages) ? (messages as unknown[]) : [];
+      const safeMessages: ChatMessageItem[] = rawMsgs
+        .filter(isValidRawMessage)
+        .map((m) => {
+          const base: ChatMessageItem = {
+            id: m.id,
+            role: m.role,
+            content: m.content,
+            timestamp: m.timestamp,
+          };
+          if (typeof m.healthRelated === 'boolean') {
+            base.healthRelated = m.healthRelated;
+          }
+          return base;
+        });
       cleaned.push({
         id,
         title: typeof title === 'string' ? title : 'Untitled',
@@ -71,6 +111,26 @@ function saveAll(chats: Chat[]) {
 import { auth, db } from './firebase';
 import { ref, set, get, child } from 'firebase/database';
 
+// Recursively remove undefined values from objects/arrays to satisfy Firebase RTDB constraints
+function isPlainObject(v: unknown): v is Record<string, unknown> {
+  return !!v && typeof v === 'object' && !Array.isArray(v);
+}
+function stripUndefinedDeep<T>(value: T): T {
+  const recurse = (val: unknown): unknown => {
+    if (Array.isArray(val)) return val.map((item) => recurse(item));
+    if (isPlainObject(val)) {
+      const out: Record<string, unknown> = {};
+      for (const [k, v2] of Object.entries(val)) {
+        if (v2 === undefined) continue;
+        out[k] = recurse(v2);
+      }
+      return out;
+    }
+    return val;
+  };
+  return recurse(value) as T;
+}
+
 export const chatStore = {
   async hydrateFromCloud() {
     const user = auth.currentUser;
@@ -81,17 +141,19 @@ export const chatStore = {
         const chats = (snap.val() as Chat[]) || [];
         saveAll(chats);
       }
-    } catch {
-      // ignore
+    } catch (err) {
+      console.error('hydrateFromCloud failed:', err);
     }
   },
   async pushToCloud() {
     const user = auth.currentUser;
     if (!user) return;
     try {
-      await set(ref(db, `users/${user.uid}/chats`), loadAll());
-    } catch {
-      // ignore transient
+  const local = loadAll();
+  const cleaned = stripUndefinedDeep(local);
+  await set(ref(db, `users/${user.uid}/chats`), cleaned);
+    } catch (err) {
+      console.error('pushToCloud failed:', err);
     }
   },
   list(): Chat[] {
@@ -127,7 +189,7 @@ export const chatStore = {
   const chats = loadAll();
   const chat = ephemeralCache[id] || chats.find(c => c.id === id);
     if (!chat) return undefined;
-    const msg: ChatMessageItem = { id: crypto.randomUUID(), role, content, timestamp: Date.now() };
+  const msg: ChatMessageItem = { id: crypto.randomUUID(), role, content, timestamp: Date.now() };
     chat.messages.push(msg);
     if (chat.ephemeral && role === 'user') {
       // Persist this previously ephemeral chat now
@@ -148,6 +210,31 @@ export const chatStore = {
     }
   window.dispatchEvent(new Event('ojas-chats-changed'));
     return chat;
+  },
+  // Add a message and return the new message id (useful for placeholders that will be updated)
+  addMessageWithId(id: string, role: ChatMessageRole, content: string, meta?: { healthRelated?: boolean }): string | undefined {
+    const chats = loadAll();
+    const chat = ephemeralCache[id] || chats.find(c => c.id === id);
+    if (!chat) return undefined;
+    const msg: ChatMessageItem = { id: crypto.randomUUID(), role, content, timestamp: Date.now(), ...(meta?.healthRelated !== undefined ? { healthRelated: meta.healthRelated } : {}) };
+    chat.messages.push(msg);
+    // Persist even if the first non-ephemeral message is from assistant (e.g., hidden intake submit)
+    if (chat.ephemeral) {
+      chat.ephemeral = false;
+      chats.push(chat);
+      try { sessionStorage.removeItem(`ojas.ephemeral.${id}`); } catch (err) { /* ignore */ }
+    }
+    // Title: prefer first user message; fallback to assistant snippet
+    if (chat.title === 'New Chat') {
+      const firstUser = chat.messages.find(m => m.role === 'user');
+      const basis = firstUser?.content || content;
+      chat.title = basis.slice(0, 40) + (basis.length > 40 ? '…' : '');
+    }
+    chat.updatedAt = Date.now();
+    saveAll(chats);
+    this.pushToCloud();
+    window.dispatchEvent(new Event('ojas-chats-changed'));
+    return msg.id;
   },
   updateMessage(chatId: string, messageId: string, content: string) {
     // Only update if chat is persisted (not ephemeral)
