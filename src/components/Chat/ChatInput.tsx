@@ -11,17 +11,61 @@ interface ChatInputProps {
   isLoading?: boolean;
   editMessage?: string;
   onCancelEdit?: () => void;
+  showExamplesAnimation?: boolean;
+  onStopGeneration?: (() => void) | null;
+  chatId?: string;
 }
 
-const ChatInput = ({ onSendMessage, isLoading, editMessage, onCancelEdit }: ChatInputProps) => {
-  const [message, setMessage] = useState(editMessage || "");
+const examplePrompts = [
+  "Track my healthy habits this week",
+  "Explain intermittent fasting simply",
+  "Suggest a balanced vegetarian meal plan",
+  "Summarize latest AI in health news",
+];
+
+const ChatInput = ({ onSendMessage, isLoading, editMessage, onCancelEdit, showExamplesAnimation, onStopGeneration, chatId }: ChatInputProps) => {
+  const [message, setMessage] = useState(() => {
+    if (editMessage) return editMessage;
+    if (chatId) {
+      try { return localStorage.getItem(`ojas.draft.${chatId}`) || ""; } catch (err) { /* localStorage blocked */ return ""; }
+    }
+    return "";
+  });
   const [files, setFiles] = useState<File[]>([]);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const { toast } = useToast();
+  const [placeholder, setPlaceholder] = useState("Ask something...");
+  React.useEffect(() => {
+    if (!showExamplesAnimation) return;
+    let idx = 0;
+    let timeout: number;
+    const cycle = () => {
+      const full = examplePrompts[idx % examplePrompts.length];
+      let chars = 0;
+      const type = () => {
+        chars++;
+        setPlaceholder(full.slice(0, chars) + (chars < full.length ? "_" : ""));
+        if (chars < full.length) {
+          timeout = window.setTimeout(type, 60);
+        } else {
+          timeout = window.setTimeout(() => { idx++; cycle(); }, 2200);
+        }
+      };
+      type();
+    };
+    cycle();
+    return () => clearTimeout(timeout);
+  }, [showExamplesAnimation]);
 
   React.useEffect(() => {
-    setMessage(editMessage || "");
+    if (editMessage) setMessage(editMessage); // editing overrides
   }, [editMessage]);
+
+  // Persist draft per chat
+  React.useEffect(() => {
+    if (!chatId) return;
+  try { localStorage.setItem(`ojas.draft.${chatId}`, message); } catch (err) { /* ignore persistence error */ }
+  }, [message, chatId]);
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -30,6 +74,7 @@ const ChatInput = ({ onSendMessage, isLoading, editMessage, onCancelEdit }: Chat
       setMessage("");
       setFiles([]);
       onCancelEdit?.();
+  if (chatId) try { localStorage.removeItem(`ojas.draft.${chatId}`); } catch (err) { /* ignore */ }
     }
   };
 
@@ -80,10 +125,10 @@ const ChatInput = ({ onSendMessage, isLoading, editMessage, onCancelEdit }: Chat
   };
 
   return (
-    <div className="border-t border-border bg-background p-4">
-      <form onSubmit={handleSubmit} className="space-y-4">
+  <div className="w-full">
+      <form onSubmit={handleSubmit} className="max-w-4xl mx-auto px-6 py-4">
         {files.length > 0 && (
-          <div className="flex gap-2 flex-wrap">
+          <div className="mb-2 flex gap-2 flex-wrap">
             {files.map((file, index) => (
               <FilePreview
                 key={`${file.name}-${index}`}
@@ -93,10 +138,10 @@ const ChatInput = ({ onSendMessage, isLoading, editMessage, onCancelEdit }: Chat
             ))}
           </div>
         )}
-        
+
         {editMessage && (
-          <div className="text-sm text-muted-foreground bg-muted/50 p-2 rounded-lg">
-            Editing message...
+          <div className="mb-2 text-xs text-muted-foreground bg-muted/50 px-2 py-1 rounded-full inline-flex items-center">
+            Editing
             {onCancelEdit && (
               <Button
                 type="button"
@@ -110,65 +155,59 @@ const ChatInput = ({ onSendMessage, isLoading, editMessage, onCancelEdit }: Chat
             )}
           </div>
         )}
-        
-        <div className="flex gap-2">
-          <div className="flex-1 relative">
-            <Textarea
-              value={message}
-              onChange={(e) => setMessage(e.target.value)}
-              onKeyDown={handleKeyPress}
-              placeholder="Type your message here..."
-              className="min-h-[60px] resize-none pr-24"
-              disabled={isLoading}
+
+  <div className="relative">
+          <Textarea
+            value={message}
+            onChange={(e) => setMessage(e.target.value)}
+            onKeyDown={handleKeyPress}
+            placeholder={placeholder}
+            className="h-14 text-[15px] leading-snug resize-none pr-36 pl-4 rounded-2xl border border-primary/30 bg-background/70 outline-none focus-visible:ring-0 placeholder:text-muted-foreground/70 shadow-[0_1px_0_0_hsl(var(--border))]"
+            disabled={isLoading}
+          />
+          <div className="absolute right-2 inset-y-0 my-auto h-9 flex items-center gap-2">
+            <div className="hidden sm:block text-xs text-muted-foreground mr-2">3 prompts left</div>
+            <input
+              ref={fileInputRef}
+              type="file"
+              multiple
+              accept="image/*,.pdf,.txt,.doc,.docx"
+              onChange={handleFileSelect}
+              className="hidden"
             />
-            <div className="absolute right-2 bottom-2 flex gap-1">
+            {isLoading && onStopGeneration && (
               <Button
                 type="button"
                 variant="ghost"
                 size="sm"
-                className="h-8 w-8 p-0"
-                disabled={isLoading}
-              >
-                <Mic className="h-4 w-4" />
-              </Button>
-              <input
-                ref={fileInputRef}
-                type="file"
-                multiple
-                accept="image/*,.pdf,.txt,.doc,.docx"
-                onChange={handleFileSelect}
-                className="hidden"
-              />
-              <Button
-                type="button"
-                variant="ghost"
-                size="sm"
-                className="h-8 w-8 p-0"
-                disabled={isLoading}
-                onClick={() => fileInputRef.current?.click()}
-              >
-                <Paperclip className="h-4 w-4" />
-              </Button>
-              <Button
-                type="submit"
-                variant="ghost"
-                size="sm"
-                className="h-8 w-8 p-0"
-                disabled={isLoading || !message.trim()}
-              >
-                {isLoading ? (
-                  <Loader2 className="h-4 w-4 animate-spin" />
-                ) : (
-                  <Send className="h-4 w-4" />
-                )}
-              </Button>
-            </div>
+                className="h-8 px-2 text-xs"
+                onClick={onStopGeneration}
+              >Stop</Button>
+            )}
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              className="h-8 w-8 p-0"
+              disabled={isLoading}
+              onClick={() => fileInputRef.current?.click()}
+            >
+              <Paperclip className="h-4 w-4" />
+            </Button>
+            <Button
+              type="submit"
+              variant="secondary"
+              size="sm"
+              className="h-9 px-3 rounded-full"
+              disabled={isLoading || !message.trim()}
+            >
+              {isLoading ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <Send className="h-4 w-4" />
+              )}
+            </Button>
           </div>
-        </div>
-        <div className="flex items-center justify-center">
-          <p className="text-xs text-muted-foreground">
-            ⚠️ AI can make mistakes. Consider checking important information.
-          </p>
         </div>
       </form>
     </div>
