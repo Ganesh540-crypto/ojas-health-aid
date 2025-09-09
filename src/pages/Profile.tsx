@@ -151,7 +151,7 @@ export default function Profile() {
               {(profile.allergies || []).map((a, i) => (
                 <Badge key={`${a}-${i}`} variant="secondary" className="flex items-center gap-1">
                   {a}
-                  <button type="button" className="ml-1 text-muted-foreground hover:text-foreground" aria-label={`Remove ${a}`} onClick={() => removeTag('allergies', i)}>
+                  <button type="button" className="ml-1 text-muted-foreground hover:text-foreground" aria-label={`Remove ${a}`} data-action="close" onClick={() => removeTag('allergies', i)}>
                     <X className="h-3 w-3" />
                   </button>
                 </Badge>
@@ -169,7 +169,7 @@ export default function Profile() {
               {(profile.preexisting || []).map((a, i) => (
                 <Badge key={`${a}-${i}`} variant="secondary" className="flex items-center gap-1">
                   {a}
-                  <button type="button" className="ml-1 text-muted-foreground hover:text-foreground" aria-label={`Remove ${a}`} onClick={() => removeTag('preexisting', i)}>
+                  <button type="button" className="ml-1 text-muted-foreground hover:text-foreground" aria-label={`Remove ${a}`} data-action="close" onClick={() => removeTag('preexisting', i)}>
                     <X className="h-3 w-3" />
                   </button>
                 </Badge>
@@ -187,7 +187,7 @@ export default function Profile() {
               {(profile.medications || []).map((a, i) => (
                 <Badge key={`${a}-${i}`} variant="secondary" className="flex items-center gap-1">
                   {a}
-                  <button type="button" className="ml-1 text-muted-foreground hover:text-foreground" aria-label={`Remove ${a}`} onClick={() => removeTag('medications', i)}>
+                  <button type="button" className="ml-1 text-muted-foreground hover:text-foreground" aria-label={`Remove ${a}`} data-action="close" onClick={() => removeTag('medications', i)}>
                     <X className="h-3 w-3" />
                   </button>
                 </Badge>

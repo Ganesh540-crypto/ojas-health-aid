@@ -20,6 +20,8 @@ export const FilePreview: React.FC<FilePreviewProps> = ({ file, onRemove }) => {
         size="sm"
         onClick={onRemove}
         className="absolute -top-2 -right-2 h-6 w-6 p-0 bg-destructive text-destructive-foreground hover:bg-destructive/90 rounded-full"
+        data-action="close"
+        aria-label="Remove file"
       >
         <X className="h-3 w-3" />
       </Button>

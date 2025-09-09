@@ -1,29 +1,11 @@
 import { GoogleGenAI } from '@google/genai';
-import { googleSearchService, type GoogleSearchItem } from './googleSearch';
 import { detectTone, isHealthRelated } from './textAnalysis';
+import { OJAS_HEALTH_SYSTEM } from './systemPrompts';
+
+// Using Gemini built-in Google Search; legacy googleSearch service removed
 
 const API_KEY = (import.meta.env?.VITE_GEMINI_API_KEY as string) || '';
 
-const SYSTEM_INSTRUCTIONS = `You are Ojas, a professional AI health companion and friendly assistant created by MedTrack (https://medtrack.co.in) under VISTORA TRAYANA LLP. You are designed to respond to general health queries and casual user interactions. Your behavior must strictly follow these guidelines:
-
-1. **Medical Responsibility**
-   - For health-related queries only: Provide clear, evidence-based information.
-   - Include relevant precautions, preventions, and lifestyle recommendations for health-related queries.
-   - Never diagnose or prescribe. Avoid speculative or anecdotal advice.
-   - DO NOT include medical disclaimers in your response text - the UI will handle warning labels separately.
-
-2. **Tone Adaptation**
-   - Detect and adapt to the user's tone based on input.
-   - Casual → friendly; angry → de‑escalate & validate; romantic → warm but professional; lazy/silly → light but on-topic.
-
-3. **Topic Control**
-   - Health queries: stay focused; general queries: be concise and helpful.
-   - If asked about MedTrack / creators: perform web search.
-
-4. **Formatting**
-   - Use headings & bullets for health answers: Summary, Key Points, Self‑Care & Lifestyle, Precautions & Red Flags, Follow‑up Question.
-   - Ground factual claims in SOURCES with [n] when sources exist.
-`;
 
 export class GeminiService {
   private ai: GoogleGenAI;
@@ -39,10 +21,11 @@ export class GeminiService {
   private isHealthRelated(message: string) { return isHealthRelated(message); }
 
   private shouldPerformWebSearch(message: string): boolean {
-    // Always search for health queries; also for organization / creator queries.
+    // Search when recency/specificity likely matters; expanded for shopping queries
     const lower = message.toLowerCase();
+    const recencyRegex = /\b(latest|recent|news|today|yesterday|tomorrow|this week|this month|this year|next week|next month|next year|202[4-9]|update|changed|guideline|policy|regulation|study|trial|paper|review|price|cost|availability|market|compare|comparison|schedule|fixture|fixtures|when|start|date|month|year|season|tournament|ipl|match|release|launch|india|WHO|FDA|EMA|NICE|best|top|under|rupees|rs|laptop|mobile|phone|graphics|card|rtx|gtx|nvidia|amd|intel)\b/i;
     const orgTriggers = ['medtrack','vistora','who created you','who made you','creator'];
-    return this.isHealthRelated(message) || orgTriggers.some(t => lower.includes(t));
+    return recencyRegex.test(message) || orgTriggers.some(t => lower.includes(t));
   }
 
   private isImportantHealthQuery(message: string): boolean {
@@ -52,6 +35,139 @@ export class GeminiService {
   }
 
   private detectToneLocal(message: string) { return detectTone(message); }
+
+  private getCurrentTimeContext(): string {
+    try {
+      const now = new Date();
+      const iso = now.toISOString();
+      const local = now.toLocaleString(undefined, { hour12: false });
+      const tz = Intl.DateTimeFormat().resolvedOptions().timeZone || 'local';
+      return `CURRENT DATETIME\nISO: ${iso}\nLocal (${tz}): ${local}`;
+    } catch {
+      return `CURRENT DATETIME\nISO: ${new Date().toISOString()}`;
+    }
+  }
+
+  private extractSources(groundingMetadata: any): Array<{ title: string; url: string; snippet?: string; displayUrl?: string }> {
+    if (!groundingMetadata?.groundingSupports) return [];
+    
+    const sources: Array<{ title: string; url: string; snippet?: string; displayUrl?: string }> = [];
+    const ensureHttp = (u: string) => /^https?:\/\//i.test(u) ? u : `https://${u}`;
+    const isRedirectHost = (host: string) => {
+      const h = (host || '').toLowerCase();
+      return (
+        h === 'vertexaisearch.cloud.google.com' ||
+        h.endsWith('.googleusercontent.com') ||
+        h === 'google.com' || h === 'www.google.com' ||
+        h === 'gemini.google.com' ||
+        h.endsWith('.google.com')
+      );
+    };
+    const pickDomainFromTitle = (title?: string): string | null => {
+      if (!title) return null;
+      const t = title.trim();
+      const full = /^(?:[a-z0-9-]+\.)+[a-z]{2,}$/i;
+      if (full.test(t)) return t.toLowerCase();
+      const any = /([a-z0-9-]+(?:\.[a-z0-9-]+)+)/i;
+      const m = t.match(any);
+      return m?.[1]?.toLowerCase() || null;
+    };
+    
+    for (const support of groundingMetadata.groundingSupports) {
+      if (support?.segment?.startIndex !== undefined && support?.groundingChunkIndices) {
+        for (const chunkIndex of support.groundingChunkIndices) {
+          const chunk = groundingMetadata.groundingChunks?.[chunkIndex];
+          if (chunk?.web) {
+            const web = chunk.web;
+            const raw = web.uri || '';
+            const clean = this.unwrapRedirect(raw);
+            let finalUrl = clean; // keep redirect link if not decodable
+            let displayHost: string | null = null;
+            try {
+              const u = new URL(ensureHttp(clean));
+              if (isRedirectHost(u.hostname)) {
+                const fromTitle = pickDomainFromTitle(web.title);
+                if (fromTitle) displayHost = fromTitle;
+              } else {
+                displayHost = u.hostname.replace(/^www\./, '');
+              }
+            } catch {
+              const fromTitle = pickDomainFromTitle(web.title);
+              if (fromTitle) displayHost = fromTitle;
+            }
+            sources.push({
+              title: web.title || 'Web Source',
+              url: finalUrl,
+              snippet: web.snippet || undefined,
+              displayUrl: displayHost ?? this.getDisplayUrl(finalUrl)
+            });
+          }
+        }
+      }
+    }
+    
+    // Remove duplicates based on URL
+    const unique = sources.filter((source, index, self) => 
+      index === self.findIndex(s => s.url === source.url)
+    );
+    
+    return unique.slice(0, 6); // Limit to 6 sources
+  }
+
+  private getDisplayUrl(url: string): string {
+    try {
+      const urlObj = new URL(url);
+      return urlObj.hostname.replace(/^www\./, '');
+    } catch {
+      return url;
+    }
+  }
+
+  // Try to unwrap common redirector URLs to the true destination
+  private unwrapRedirect(raw: string): string {
+    try {
+      const ensureHttp = (u: string) => /^https?:\/\//i.test(u) ? u : `https://${u}`;
+      let u: URL;
+      try { u = new URL(raw); } catch { u = new URL(ensureHttp(raw)); }
+
+      // Handle custom schemes like grounding-api-redirect://host/path -> https://host/path
+      if (/^grounding/i.test(u.protocol) || /^vertex/i.test(u.protocol) || /^genai/i.test(u.protocol)) {
+        if (u.hostname) {
+          const rebuilt = `https://${u.hostname}${u.pathname || ''}${u.search || ''}`;
+          return rebuilt;
+        }
+      }
+
+      // Try to decode Vertex grounding redirect token: /grounding-api-redirect/<base64url>
+      if (/vertexaisearch\.cloud\.google\.com$/i.test(u.hostname) && /\/grounding-api-redirect\//i.test(u.pathname)) {
+        const token = u.pathname.split('/').filter(Boolean).pop() || '';
+        const b64 = token.replace(/-/g, '+').replace(/_/g, '/');
+        try {
+          // Pad base64 if needed
+          const pad = b64.length % 4 === 2 ? '==' : b64.length % 4 === 3 ? '=' : '';
+          const decoded = atob(b64 + pad);
+          const match = decoded.match(/https?:\/\/[^\s"']+/);
+          if (match && match[0]) {
+            return match[0];
+          }
+        } catch { /* ignore and continue */ }
+      }
+
+      const paramsToCheck = ['url', 'q', 'u', 'target', 'dest', 'destination', 'redirect', 'redirect_uri'];
+      for (const key of paramsToCheck) {
+        const v = u.searchParams.get(key);
+        if (!v) continue;
+        try {
+          const decoded = decodeURIComponent(v);
+          const candidate = new URL(ensureHttp(decoded));
+          return candidate.toString();
+        } catch { /* ignore and continue */ }
+      }
+      return u.toString();
+    } catch {
+      return raw;
+    }
+  }
 
   private addToMemory(userMessage: string, response: string, health: boolean) {
     this.conversationHistory.push({ role: 'user', parts: [{ text: userMessage }] }, { role: 'model', parts: [{ text: response }] });
@@ -63,74 +179,77 @@ export class GeminiService {
     }
   }
 
-  async generateResponse(message: string, options?: { forceSearch?: boolean; historyParts?: Array<{ role: string; parts: { text: string }[] }>; originalMessage?: string; rewrittenQuery?: string; }): Promise<{ content: string; isHealthRelated: boolean }> {
+  async generateResponse(
+    message: string,
+    options?: {
+      historyParts?: Array<{ role: 'user' | 'model'; parts: Array<{ text: string }> }>;
+      forceSearch?: boolean;
+    }
+  ): Promise<{ content: string; isHealthRelated: boolean; sources?: Array<{ title: string; url: string; snippet?: string; displayUrl?: string }> }> {
+    const isHealth = this.isHealthRelated(message);
+    const forceSearch = options?.forceSearch || this.shouldPerformWebSearch(message);
+    const currentTime = this.getCurrentTimeContext();
+
+    // Build conversation history with provided parts or existing history
+    const history = options?.historyParts || this.conversationHistory;
+    const contents = [...history, { role: 'user' as const, parts: [{ text: message }] }];
+
+    // Always use web search for health queries
+    const config: Record<string, any> = {
+      systemInstruction: `${OJAS_HEALTH_SYSTEM}\n\n${currentTime}`,
+      generationConfig: {
+        temperature: 0.8,
+        maxOutputTokens: 8192
+      }
+    };
+
+    // Enable search for health queries or when explicitly requested
+    if (forceSearch) {
+      config.tools = [{ googleSearch: {} }];
+    }
+
+    let full = '';
+    let groundingMetadata: any = null;
+
     try {
-      const base = options?.originalMessage ?? message;
-      const health = this.isHealthRelated(base);
-      const important = health && this.isImportantHealthQuery(base);
-      const tone = this.detectToneLocal(base);
-
-      let instructions = SYSTEM_INSTRUCTIONS;
-      if (this.conversationMemory.length) instructions += `\n\nRECENT HEALTH CONTEXT:\n${this.conversationMemory.join('\n')}`;
-      if (tone !== 'neutral') instructions += `\n\nUSER TONE: ${tone.toUpperCase()} (adapt appropriately).`;
-      instructions += `\n\nIf SOURCES provided: ground statements with bracket citations [n]. If none: say sources unavailable briefly then provide cautious generalized guidance and ask ONE clarifying question.`;
-
-      // Decide if we search (health always true)
-      const doSearch = options?.forceSearch === true || this.shouldPerformWebSearch(base) || health;
-      let sourcesMarkdown = '';
-      let searchContext = '';
-      if (doSearch) {
-        const query = options?.rewrittenQuery ?? base;
-        const evidenceDomains = ['site:who.int','site:cdc.gov','site:nih.gov','site:mayoclinic.org','site:pubmed.ncbi.nlm.nih.gov','site:.gov','site:.org','site:.edu'];
-        const candidateQueries: string[] = [];
-        if (health) {
-          for (const d of evidenceDomains.slice(0,6)) candidateQueries.push(`${query} ${d}`);
-          candidateQueries.push(`${query} 2025 guidelines`);
-        } else {
-          candidateQueries.push(`${query} site:.gov`, `${query} site:.org`, `${query} site:.edu`);
+      try {
+        const response = await this.ai.models.generateContentStream({ model: this.model, config, contents });
+        for await (const chunk of response) {
+          if (chunk.text) full += chunk.text;
+          if ((chunk as any).groundingMetadata) {
+            groundingMetadata = (chunk as any).groundingMetadata;
+          }
+          if ((chunk as any).candidates?.[0]?.groundingMetadata) {
+            groundingMetadata = (chunk as any).candidates[0].groundingMetadata;
+          }
         }
-        candidateQueries.push(query);
-
-        const aggregated: GoogleSearchItem[] = [];
-        const seen = new Set<string>();
-        for (const q of candidateQueries) {
-          if (aggregated.length >= 6) break;
-            const r = await googleSearchService.search(q, 5);
-            for (const item of r) {
-              if (!seen.has(item.link)) {
-                aggregated.push(item);
-                seen.add(item.link);
-                if (aggregated.length >= 6) break;
-              }
-            }
-        }
-        if (aggregated.length) {
-          sourcesMarkdown = googleSearchService.formatSearchResults(aggregated);
-          searchContext = `SOURCES (numbered):\n${sourcesMarkdown}`;
-        } else {
-          searchContext = 'NO_WEB_SOURCES_RETRIEVED';
+      } catch (streamErr) {
+        console.warn('Stream failed, retrying non-stream request...', streamErr);
+        // Fallback to non-streaming request
+        try {
+          const nonStream = await this.ai.models.generateContent({ model: this.model, config, contents });
+          // Support both getter and method styles for text on different SDK versions
+          const t: any = (nonStream as any).text;
+          full = typeof t === 'function' ? t.call(nonStream) || '' : (t ?? '');
+          // Pull grounding from candidates if present
+          const cand = (nonStream as any)?.candidates?.[0];
+          if (cand?.groundingMetadata) groundingMetadata = cand.groundingMetadata;
+        } catch (nonStreamErr) {
+          console.error('Non-stream also failed', nonStreamErr);
+          throw nonStreamErr;
         }
       }
-
-      const history = options?.historyParts && options.historyParts.length ? options.historyParts.slice(-6) : this.conversationHistory.slice(-6);
-      const contents: Array<{ role: string; parts: { text: string }[] }> = [...history];
-      if (searchContext) contents.push({ role: 'user', parts: [{ text: searchContext }] });
-      if (options?.rewrittenQuery || options?.originalMessage) {
-        contents.push({ role: 'user', parts: [{ text: `ORIGINAL QUERY:\n${options?.originalMessage ?? message}\n\nREWRITTEN QUERY:\n${options?.rewrittenQuery}` }] });
-      }
-      contents.push({ role: 'user', parts: [{ text: message }] });
-
-      const config = { systemInstruction: instructions, ...(important && { thinkingConfig: { thinkingBudget: -1 } }) };
-      const response = await this.ai.models.generateContentStream({ model: this.model, config, contents });
-      let full = '';
-      for await (const chunk of response) if (chunk.text) full += chunk.text;
+      
+      // Extract sources from grounding metadata
+      const sources = this.extractSources(groundingMetadata);
+      
       const finalText = full || 'I could not generate a response this time.';
-      const fullWithSources = sourcesMarkdown ? `${finalText}\n\nSources:\n${sourcesMarkdown}` : finalText;
-      this.addToMemory(base, fullWithSources, health);
-      return { content: fullWithSources, isHealthRelated: health };
+      this.addToMemory(message, finalText, isHealth);
+      return { content: finalText, isHealthRelated: isHealth, sources: sources.length > 0 ? sources : undefined };
+
     } catch (e) {
       console.error('Gemini API Error:', e);
-      return { content: 'I encountered an error processing that. Please retry.', isHealthRelated: false };
+      return { content: 'I encountered an error processing that. Please retry.', isHealthRelated: false, sources: undefined };
     }
   }
 }

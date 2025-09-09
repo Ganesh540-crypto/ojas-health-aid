@@ -75,7 +75,7 @@ export default function Onboarding() {
   };
 
   return (
-    <div className="min-h-screen bg-background grid place-items-center p-6">
+    <div className="min-h-screen bg-background grid place-items-center p-6" aria-busy={saving ? true : undefined} data-loading={saving ? 'true' : undefined}>
       <Card className="w-full max-w-3xl">
         <CardHeader>
           <CardTitle>Welcome to Ojas</CardTitle>

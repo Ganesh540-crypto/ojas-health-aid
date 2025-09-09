@@ -21,6 +21,16 @@ import { chatStore } from "@/lib/chatStore";
 import { useEffect, useState } from "react";
 import { auth } from "@/lib/firebase";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
@@ -31,13 +41,14 @@ import { Badge } from "@/components/ui/badge";
 import { ref, set } from 'firebase/database';
 import { db } from "@/lib/firebase";
 import { signOut } from "firebase/auth";
-import { toast } from "@/hooks/use-toast";
+import { toast, useToast } from "@/hooks/use-toast";
 import { ScrollArea } from "@/components/ui/scroll-area";
 
 export default function AppShell() {
   const [chats, setChats] = useState(chatStore.list());
   const location = useLocation();
   const navigate = useNavigate();
+  const { toast } = useToast();
   const [openSettings, setOpenSettings] = useState(false);
   const [settings, setSettings] = useState<{ notifications: boolean; theme: 'light' | 'dark' | 'system'; accent: 'orange' | 'blue' | 'green'; compact: boolean; scrollLock: boolean; typeSpeed: number; }>({ notifications: true, theme: 'system', accent: 'orange', compact: false, scrollLock: true, typeSpeed: 25 });
   const email = auth.currentUser?.email || 'Account';
@@ -47,6 +58,10 @@ export default function AppShell() {
   const [newAllergy, setNewAllergy] = useState("");
   const [newCondition, setNewCondition] = useState("");
   const [newMedication, setNewMedication] = useState("");
+  const [renameDialogOpen, setRenameDialogOpen] = useState(false);
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
+  const [selectedChat, setSelectedChat] = useState<{ id: string; title: string } | null>(null);
+  const [newChatTitle, setNewChatTitle] = useState("");
 
   useEffect(() => {
     // hydrate from cloud when user logs in
@@ -136,25 +151,17 @@ export default function AppShell() {
                         <MoreHorizontal className="h-4 w-4" />
                       </SidebarMenuAction>
                     </DropdownMenuTrigger>
-                    <DropdownMenuContent align="end" className="w-40 rounded-xl">
-                      <DropdownMenuItem onClick={() => {
-                        const title = prompt('Rename chat', c.title);
-                        if (title && title.trim()) {
-                          chatStore.rename(c.id, title.trim());
-                          setChats(chatStore.list());
-                        }
+                    <DropdownMenuContent align="end" className="w-48 bg-background/95 backdrop-blur border shadow-lg rounded-lg">
+                      <DropdownMenuItem className="cursor-pointer" onClick={() => {
+                        setSelectedChat({ id: c.id, title: c.title });
+                        setNewChatTitle(c.title);
+                        setRenameDialogOpen(true);
                       }}>
                         <Pencil className="h-4 w-4 mr-2" /> Rename
                       </DropdownMenuItem>
-                      <DropdownMenuItem className="text-destructive focus:text-destructive" onClick={() => {
-                        if (confirm('Delete this chat? This cannot be undone.')) {
-                          chatStore.remove(c.id);
-                          setChats(chatStore.list());
-                          if (location.pathname === `/chat/${c.id}`) {
-                            const first = chatStore.list()[0];
-                            if (first) navigate(`/chat/${first.id}`); else startNew();
-                          }
-                        }
+                      <DropdownMenuItem className="text-destructive focus:text-destructive cursor-pointer" onClick={() => {
+                        setSelectedChat({ id: c.id, title: c.title });
+                        setDeleteDialogOpen(true);
                       }}>
                         <Trash2 className="h-4 w-4 mr-2" /> Delete
                       </DropdownMenuItem>
@@ -173,8 +180,8 @@ export default function AppShell() {
                 <span className="truncate">{email}</span>
               </Button>
             </DropdownMenuTrigger>
-            <DropdownMenuContent align="end" className="w-56 rounded-xl">
-              <DropdownMenuLabel className="truncate">{email}</DropdownMenuLabel>
+            <DropdownMenuContent align="end" className="w-56 bg-background/95 backdrop-blur border shadow-lg rounded-lg">
+              <DropdownMenuLabel className="truncate font-medium">{email}</DropdownMenuLabel>
               <DropdownMenuSeparator />
               <DropdownMenuItem onClick={() => setOpenSettings(true)}>
                 <Settings className="h-4 w-4 mr-2" /> Settings…
@@ -186,9 +193,79 @@ export default function AppShell() {
           </DropdownMenu>
         </SidebarFooter>
       </Sidebar>
-      <SidebarInset>
+      <SidebarInset className="h-screen overflow-hidden">
         <Outlet />
       </SidebarInset>
+
+      {/* Rename Chat Dialog */}
+      <AlertDialog open={renameDialogOpen} onOpenChange={setRenameDialogOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Rename Chat</AlertDialogTitle>
+            <AlertDialogDescription>
+              Enter a new name for this chat.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <Input
+            value={newChatTitle}
+            onChange={(e) => setNewChatTitle(e.target.value)}
+            placeholder="Chat title"
+            className="my-4"
+          />
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction onClick={() => {
+              if (selectedChat && newChatTitle.trim()) {
+                chatStore.rename(selectedChat.id, newChatTitle.trim());
+                setChats(chatStore.list());
+                toast({
+                  title: "Chat renamed",
+                  description: `Renamed to "${newChatTitle.trim()}"`
+                });
+              }
+              setRenameDialogOpen(false);
+            }}>
+              Rename
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* Delete Chat Dialog */}
+      <AlertDialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete Chat?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This will permanently delete "{selectedChat?.title}". This action cannot be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              onClick={() => {
+                if (selectedChat) {
+                  chatStore.remove(selectedChat.id);
+                  setChats(chatStore.list());
+                  if (location.pathname === `/chat/${selectedChat.id}`) {
+                    const first = chatStore.list()[0];
+                    if (first) navigate(`/chat/${first.id}`); 
+                    else startNew();
+                  }
+                  toast({
+                    title: "Chat deleted",
+                    description: "The chat has been removed."
+                  });
+                }
+                setDeleteDialogOpen(false);
+              }}
+            >
+              Delete
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       {/* Settings Dialog */}
       <Dialog open={openSettings} onOpenChange={setOpenSettings}>

@@ -7,16 +7,18 @@ export default function AuthLayout({
   form,
   info,
   initialSide = 'left',
+  busy,
 }: {
   form: ReactNode;
   info: ReactNode;
   initialSide?: Side;
+  busy?: boolean;
 }) {
   const [formSide, setFormSide] = useState<Side>(initialSide);
   const flip = () => setFormSide((s) => (s === 'left' ? 'right' : 'left'));
 
   return (
-    <div className="min-h-screen grid grid-cols-1 md:grid-cols-2 bg-background">
+    <div className="min-h-screen grid grid-cols-1 md:grid-cols-2 bg-background" aria-busy={busy ? true : undefined} data-loading={busy ? 'true' : undefined}>
       {/* Form Panel */}
       <div className={cn("flex items-center justify-center p-6 md:p-10", formSide === 'left' ? 'order-1' : 'order-2')}> 
         <div className="w-full max-w-md">

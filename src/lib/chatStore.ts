@@ -6,6 +6,7 @@ export interface ChatMessageItem {
   content: string;
   timestamp: number;
   healthRelated?: boolean;
+  sources?: Array<{ title: string; url: string; snippet?: string; displayUrl?: string }>;
 }
 
 export interface Chat {
@@ -53,6 +54,7 @@ function loadAll(): Chat[] {
         content?: unknown;
         timestamp?: unknown;
         healthRelated?: unknown;
+        sources?: unknown;
       };
       const isValidRawMessage = (
         m: unknown
@@ -62,6 +64,7 @@ function loadAll(): Chat[] {
         content: string;
         timestamp: number;
         healthRelated?: unknown;
+        sources?: unknown;
       } => {
         if (!m || typeof m !== 'object') return false;
         const r = m as RawMessage;
@@ -86,6 +89,9 @@ function loadAll(): Chat[] {
           };
           if (typeof m.healthRelated === 'boolean') {
             base.healthRelated = m.healthRelated;
+          }
+          if (Array.isArray(m.sources)) {
+            base.sources = m.sources as Array<{ title: string; url: string; snippet?: string; displayUrl?: string }>;
           }
           return base;
         });
@@ -117,12 +123,28 @@ function isPlainObject(v: unknown): v is Record<string, unknown> {
 }
 function stripUndefinedDeep<T>(value: T): T {
   const recurse = (val: unknown): unknown => {
-    if (Array.isArray(val)) return val.map((item) => recurse(item));
+    if (Array.isArray(val)) {
+      console.log('stripUndefinedDeep: Processing array:', val);
+      // For Firebase compatibility, ensure arrays have proper numeric indices
+      const cleaned = val.map((item) => recurse(item)).filter(item => item !== undefined);
+      return cleaned; // Preserve empty arrays instead of converting to null
+    }
     if (isPlainObject(val)) {
       const out: Record<string, unknown> = {};
       for (const [k, v2] of Object.entries(val)) {
         if (v2 === undefined) continue;
-        out[k] = recurse(v2);
+        if (k === 'sources' && Array.isArray(v2)) {
+          console.log('stripUndefinedDeep: Processing sources array:', v2);
+          console.log('stripUndefinedDeep: Source array length:', v2.length);
+          console.log('stripUndefinedDeep: First source:', v2[0]);
+          // Force sources to be a proper Firebase-compatible array
+          const cleanedSources = v2.filter(source => source != null);
+          console.log('stripUndefinedDeep: Cleaned sources length:', cleanedSources.length);
+          console.log('stripUndefinedDeep: Cleaned sources:', cleanedSources);
+          out[k] = cleanedSources; // Preserve sources arrays instead of converting to null
+        } else {
+          out[k] = recurse(v2);
+        }
       }
       return out;
     }
@@ -139,7 +161,10 @@ export const chatStore = {
       const snap = await get(child(ref(db), `users/${user.uid}/chats`));
       if (snap.exists()) {
         const chats = (snap.val() as Chat[]) || [];
+        console.log('ChatStore: Loaded from Firebase:', JSON.stringify(chats, null, 2));
         saveAll(chats);
+      } else {
+        console.log('ChatStore: No data found in Firebase');
       }
     } catch (err) {
       console.error('hydrateFromCloud failed:', err);
@@ -149,9 +174,25 @@ export const chatStore = {
     const user = auth.currentUser;
     if (!user) return;
     try {
-  const local = loadAll();
-  const cleaned = stripUndefinedDeep(local);
-  await set(ref(db, `users/${user.uid}/chats`), cleaned);
+      const local = loadAll();
+      console.log('ChatStore: About to save to Firebase:', JSON.stringify(local, null, 2));
+      
+      // Check if any messages have sources
+      const messagesWithSources = local.flatMap(chat => 
+        (chat.messages || []).filter(msg => msg.sources && msg.sources.length > 0)
+      );
+      console.log('ChatStore: Messages with sources before cleaning:', messagesWithSources.length, messagesWithSources);
+      
+      const cleaned = stripUndefinedDeep(local);
+      console.log('ChatStore: After stripUndefinedDeep:', JSON.stringify(cleaned, null, 2));
+      
+      // Check if sources survived cleaning
+      const cleanedMessagesWithSources = cleaned.flatMap(chat => 
+        (chat.messages || []).filter(msg => msg.sources && msg.sources.length > 0)
+      );
+      console.log('ChatStore: Messages with sources after cleaning:', cleanedMessagesWithSources.length, cleanedMessagesWithSources);
+      await set(ref(db, `users/${user.uid}/chats`), cleaned);
+      console.log('ChatStore: Successfully saved to Firebase');
     } catch (err) {
       console.error('pushToCloud failed:', err);
     }
@@ -200,8 +241,10 @@ export const chatStore = {
       delete ephemeralCache[id];
   try { sessionStorage.removeItem(`ojas.ephemeral.${id}`); } catch (err) { /* ignore */ }
     }
+    // Generate smart title on first user message
     if (chat.title === 'New Chat' && role === 'user') {
-      chat.title = content.slice(0, 40) + (content.length > 40 ? '…' : '');
+      // Will be updated by AI after response
+      chat.title = 'Chat ' + new Date().toLocaleDateString();
     }
     chat.updatedAt = Date.now();
     if (!chat.ephemeral) {
@@ -212,11 +255,18 @@ export const chatStore = {
     return chat;
   },
   // Add a message and return the new message id (useful for placeholders that will be updated)
-  addMessageWithId(id: string, role: ChatMessageRole, content: string, meta?: { healthRelated?: boolean }): string | undefined {
+  addMessageWithId(id: string, role: ChatMessageRole, content: string, meta?: { healthRelated?: boolean; sources?: Array<{ title: string; url: string; snippet?: string; displayUrl?: string }> }): string | undefined {
     const chats = loadAll();
     const chat = ephemeralCache[id] || chats.find(c => c.id === id);
     if (!chat) return undefined;
-    const msg: ChatMessageItem = { id: crypto.randomUUID(), role, content, timestamp: Date.now(), ...(meta?.healthRelated !== undefined ? { healthRelated: meta.healthRelated } : {}) };
+    const msg: ChatMessageItem = { 
+      id: crypto.randomUUID(), 
+      role, 
+      content, 
+      timestamp: Date.now(), 
+      ...(meta?.healthRelated !== undefined ? { healthRelated: meta.healthRelated } : {}),
+      ...(meta?.sources ? { sources: meta.sources } : {})
+    };
     chat.messages.push(msg);
     // Persist even if the first non-ephemeral message is from assistant (e.g., hidden intake submit)
     if (chat.ephemeral) {
@@ -236,16 +286,28 @@ export const chatStore = {
     window.dispatchEvent(new Event('ojas-chats-changed'));
     return msg.id;
   },
-  updateMessage(chatId: string, messageId: string, content: string) {
+  updateMessage(chatId: string, messageId: string, content: string, preserveSources = true) {
     // Only update if chat is persisted (not ephemeral)
     const chats = loadAll();
     const chat = chats.find(c => c.id === chatId);
     if (!chat) return;
     const msg = chat.messages.find(m => m.id === messageId);
     if (!msg) return;
+    
+    // Preserve sources when updating content
+    const originalSources = msg.sources;
     msg.content = content;
+    if (preserveSources && originalSources) {
+      msg.sources = originalSources;
+      console.log('ChatStore: Preserving sources during update:', originalSources);
+    }
+    
     chat.updatedAt = Date.now();
-    saveAll(chats); // skip cloud push for every tiny update (bandwidth)
+    saveAll(chats);
+    // Push to cloud when sources are present to ensure they persist
+    if (msg.sources && msg.sources.length > 0) {
+      this.pushToCloud();
+    }
   },
   rename(id: string, title: string): Chat | undefined {
     const chats = loadAll();
@@ -273,5 +335,17 @@ export const chatStore = {
       const c = ephemeralCache[id];
       if (c.messages.length === 0) delete ephemeralCache[id];
     }
+  },
+  updateTitle(id: string, title: string): void {
+    const chats = loadAll();
+    const chat = ephemeralCache[id] || chats.find(c => c.id === id);
+    if (!chat) return;
+    chat.title = title;
+    chat.updatedAt = Date.now();
+    if (!chat.ephemeral) {
+      saveAll(chats);
+      this.pushToCloud();
+    }
+    window.dispatchEvent(new Event('ojas-chats-changed'));
   }
 };

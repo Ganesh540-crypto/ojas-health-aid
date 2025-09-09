@@ -1,17 +1,19 @@
 import { useState, useRef, useEffect } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import ChatHeader from "./ChatHeader";
-import { Button } from "@/components/ui/button";
 // Controls moved to settings; no per-chat UI bar now.
 import ChatMessage from "./ChatMessage";
 import ChatInput from "./ChatInput";
-import WelcomeScreen from "./WelcomeScreen";
+import SourcesDisplay from "./SourcesDisplay";
+import WelcomeScreen from "@/components/Chat/WelcomeScreen";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { chatStore } from "@/lib/chatStore";
+import { Button } from "@/components/ui/button";
+import { ChevronDown } from "lucide-react";
 import type { HealthIntakePayload, HealthIntakeQuestion } from '@/lib/healthIntake';
 import { memoryStore, type MemoryMessage } from "@/lib/memory";
 import { auth } from "@/lib/firebase";
 import { profileStore } from "@/lib/profileStore";
+import { chatStore } from "@/lib/chatStore";
 
 interface Message {
   id: string;
@@ -19,6 +21,7 @@ interface Message {
   isBot: boolean;
   timestamp: Date;
   healthRelated?: boolean;
+  sources?: Array<{ title: string; url: string; snippet?: string; displayUrl?: string }>;
 }
 
 const ChatContainer = () => {
@@ -30,7 +33,8 @@ const ChatContainer = () => {
   const [isLoading, setIsLoading] = useState(false);
   const [streamController, setStreamController] = useState<{ stop: () => void } | null>(null);
   const [scrollLocked, setScrollLocked] = useState(true);
-  const [speed, setSpeed] = useState<number>(25);
+  const [showScrollButton, setShowScrollButton] = useState(false);
+  const [shouldAutoScroll, setShouldAutoScroll] = useState(true);
   const [editingMessage, setEditingMessage] = useState<string>("");
   const [profile, setProfile] = useState(() => profileStore.get());
   const [intake, setIntake] = useState<HealthIntakePayload | null>(null);
@@ -38,6 +42,8 @@ const ChatContainer = () => {
   const [awaitingIntake, setAwaitingIntake] = useState(false);
   const scrollAreaRef = useRef<HTMLDivElement>(null);
   const [intakeIndex, setIntakeIndex] = useState(0);
+  const [thinkingMode, setThinkingMode] = useState<'thinking' | 'searching'>('thinking');
+  const [thinkingLabel, setThinkingLabel] = useState<string>('Thinking');
 
   const scrollToBottom = (smooth = true) => {
     if (scrollAreaRef.current) {
@@ -53,25 +59,38 @@ const ChatContainer = () => {
   };
 
   useEffect(() => {
+    if (shouldAutoScroll && messages.length > 0) {
+      const timer = setTimeout(() => {
+        scrollToBottom();
+      }, 100);
+      return () => clearTimeout(timer);
+    }
+  }, [messages, shouldAutoScroll]);
+
+  useEffect(() => {
     if (scrollLocked) scrollToBottom();
   }, [messages, scrollLocked]);
 
-  // Persist preferences
-  // Listen for settings changes (speed & scroll lock default)
+  // Auto-scroll detection
   useEffect(() => {
-    const apply = () => {
-      try {
-        const raw = localStorage.getItem('ojas.settings.v1');
-        if (!raw) return;
-        const parsed = JSON.parse(raw);
-        if (typeof parsed.typeSpeed === 'number') setSpeed(parsed.typeSpeed);
-        if (typeof parsed.scrollLock === 'boolean') setScrollLocked(parsed.scrollLock);
-      } catch {/* ignore */}
+    const scrollContainer = scrollAreaRef.current?.querySelector('[data-radix-scroll-area-viewport]');
+    if (!scrollContainer) return;
+    
+    const handleScroll = () => {
+      const { scrollTop, scrollHeight, clientHeight } = scrollContainer as HTMLElement;
+      const isAtBottom = scrollHeight - scrollTop - clientHeight < 100;
+      
+      // Only update auto-scroll if we're not currently streaming
+      if (!isLoading || !streamController) {
+        setShouldAutoScroll(isAtBottom);
+      }
+      setShowScrollButton(!isAtBottom);
+      setScrollLocked(isAtBottom);
     };
-    apply();
-    window.addEventListener('ojas-settings-changed', apply);
-    return () => window.removeEventListener('ojas-settings-changed', apply);
-  }, []);
+    
+    scrollContainer.addEventListener('scroll', handleScroll);
+    return () => scrollContainer.removeEventListener('scroll', handleScroll);
+  }, [isLoading, streamController]);
 
   // Load chat history for this chatId and sync memory
   useEffect(() => {
@@ -107,6 +126,7 @@ const ChatContainer = () => {
         isBot: m.role === 'assistant',
         timestamp: new Date(m.timestamp),
         healthRelated: typeof m.healthRelated === 'boolean' ? m.healthRelated : false,
+        sources: m.sources,
       }));
       setMessages(mapped);
       const mem: MemoryMessage[] = chat.messages.map(m => ({ role: m.role, content: m.content, timestamp: m.timestamp }));
@@ -135,11 +155,11 @@ const ChatContainer = () => {
     if (awaitingIntake && intake) {
       const packaged = { intakeAnswers: { freeform: message, structured: intakeAnswers } };
       const jsonPayload = JSON.stringify(packaged, null, 2);
-  setAwaitingIntake(false);
-  setIntake(null);
-  setIntakeAnswers({});
-  // Send answers to AI without adding a user-visible message
-  return submitIntake(jsonPayload);
+      setAwaitingIntake(false);
+      setIntake(null);
+      setIntakeAnswers({});
+      // Send answers to AI without adding a user-visible message
+      return submitIntake(jsonPayload);
     }
     let finalMessage = message;
     
@@ -171,7 +191,7 @@ const ChatContainer = () => {
       return;
     }
 
-  const userMessage: Message = {
+    const userMessage: Message = {
       id: Date.now().toString(),
       content: finalMessage,
       isBot: false,
@@ -181,12 +201,23 @@ const ChatContainer = () => {
     setMessages(prev => [...prev, userMessage]);
     if (chatId) {
       chatStore.addMessage(chatId, 'user', finalMessage);
-  chatStore.pushToCloud();
+      chatStore.pushToCloud();
     }
+    // Pick loader mode+label heuristically before routing so UI shows the right state
+    const inferLoader = (m: string): { mode: 'thinking' | 'searching'; label: string } => {
+      const lower = m.toLowerCase();
+      const research = ['research','sources','cite','evidence','current','today','market','price','best','compare','latest','india'];
+      const health = ['symptom','pain','fever','medicine','medication','doctor','hospital','treatment','diet','exercise','injury','headache','diabetes','cancer','allergy','infection','virus','blood pressure','anxiety','depression','stress','fracture','urgent','emergency','serious','chest pain','stroke','heart attack'];
+      const trigger = research.some(k => lower.includes(k)) || health.some(k => lower.includes(k));
+      return trigger ? { mode: 'searching', label: 'Searching' } : { mode: 'thinking', label: 'Thinking' };
+    };
+    const inferred = inferLoader(finalMessage);
+    setThinkingMode(inferred.mode);
+    setThinkingLabel(inferred.label);
     setIsLoading(true);
     try {
       const { aiRouter } = await import('@/lib/aiRouter');
-      const response = await aiRouter.route(finalMessage);
+      const response = await aiRouter.route(finalMessage, chatId || undefined);
       // If router returned intake questions, open carousel UI and DO NOT insert the interim notice into chat history.
       if (response.intake && response.awaitingIntakeAnswers) {
         setIntake(response.intake);
@@ -199,7 +230,7 @@ const ChatContainer = () => {
       // Persist an assistant placeholder message with healthRelated flag so it survives refresh
       let botMessageId: string | undefined;
       if (chatId) {
-        botMessageId = chatStore.addMessageWithId(chatId, 'assistant', '', { healthRelated: response.isHealthRelated });
+        botMessageId = chatStore.addMessageWithId(chatId, 'assistant', '', { healthRelated: response.isHealthRelated, sources: response.sources });
       }
       const botId = botMessageId || (Date.now() + 1).toString();
       const botMessage: Message = {
@@ -207,11 +238,12 @@ const ChatContainer = () => {
         content: "",
         isBot: true,
         timestamp: new Date(),
-        healthRelated: response.isHealthRelated
+        healthRelated: response.isHealthRelated,
+        sources: response.sources
       };
       setMessages(prev => [...prev, botMessage]);
       let i = 0;
-      const chunk = Math.max(1, Math.round(full.length / (800 / speed)));
+      const chunk = Math.max(1, Math.round(full.length / 32));
       let stopped = false;
       const interval = setInterval(() => {
         if (stopped) return;
@@ -240,21 +272,25 @@ const ChatContainer = () => {
         content: "I apologize, but I encountered an error while processing your request. Please try again.",
         isBot: true,
         timestamp: new Date(),
-        healthRelated: false
+        healthRelated: false,
+        sources: undefined
       };
       setMessages(prev => [...prev, errorMessage]);
       if (chatId) chatStore.addMessage(chatId, 'assistant', errorMessage.content);
     } finally {
-  if (!streamController) setIsLoading(false);
+      if (!streamController) setIsLoading(false);
     }
   };
 
   // Hidden submit path for intake answers: does NOT add a user message; streams assistant reply
   const submitIntake = async (jsonPayload: string) => {
+    // Intake flows always escalate to search
+    setThinkingMode('searching');
+    setThinkingLabel('Searching');
     setIsLoading(true);
     try {
       const { aiRouter } = await import('@/lib/aiRouter');
-      const response = await aiRouter.route(jsonPayload);
+      const response = await aiRouter.route(jsonPayload, chatId || undefined);
       if (response.intake && response.awaitingIntakeAnswers) {
         setIntake(response.intake);
         setAwaitingIntake(true);
@@ -264,7 +300,7 @@ const ChatContainer = () => {
       const full = response.content;
       let botMessageId: string | undefined;
       if (chatId) {
-        botMessageId = chatStore.addMessageWithId(chatId, 'assistant', '', { healthRelated: response.isHealthRelated });
+        botMessageId = chatStore.addMessageWithId(chatId, 'assistant', '', { healthRelated: response.isHealthRelated, sources: response.sources });
       }
       const botId = botMessageId || (Date.now() + 1).toString();
       const botMessage: Message = {
@@ -272,11 +308,12 @@ const ChatContainer = () => {
         content: "",
         isBot: true,
         timestamp: new Date(),
-        healthRelated: response.isHealthRelated
+        healthRelated: response.isHealthRelated,
+        sources: response.sources
       };
       setMessages(prev => [...prev, botMessage]);
       let i = 0;
-      const chunk = Math.max(1, Math.round(full.length / (800 / speed)));
+      const chunk = Math.max(1, Math.round(full.length / 32));
       let stopped = false;
       const interval = setInterval(() => {
         if (stopped) return;
@@ -303,7 +340,8 @@ const ChatContainer = () => {
         content: "I apologize, but I encountered an error while processing your request. Please try again.",
         isBot: true,
         timestamp: new Date(),
-        healthRelated: false
+        healthRelated: false,
+        sources: undefined
       };
       setMessages(prev => [...prev, errorMessage]);
       if (chatId) chatStore.addMessage(chatId, 'assistant', errorMessage.content);
@@ -321,9 +359,9 @@ const ChatContainer = () => {
   };
 
   return (
-    <div className="h-screen flex flex-col bg-background">
+    <div className="flex flex-col h-full bg-background overflow-hidden" aria-busy={isLoading || chatLoading ? true : undefined} data-loading={isLoading || chatLoading ? 'true' : undefined}>
       <ChatHeader />
-  {/* Controls removed; managed in Settings dialog */}
+      {/* Controls removed; managed in Settings dialog */}
       <div className="flex-1 overflow-hidden flex flex-col">
         {chatLoading && (
           <div className="flex-1 flex flex-col items-center justify-center gap-2 text-xs text-muted-foreground">
@@ -336,30 +374,68 @@ const ChatContainer = () => {
         {!chatLoading && messages.length === 0 ? (
           <WelcomeScreen onSendMessage={handleSendMessage} />
         ) : (
-          <ScrollArea className="flex-1" ref={scrollAreaRef}>
-            <div className="min-h-full mx-auto px-6 lg:px-8 py-8 space-y-4" style={{ maxWidth: 1000, fontSize: '100%' }}>
-              {messages.map((message) => (
-                <div key={message.id} className={message.isBot ? 'animate-fade-in' : ''}>
-                  <ChatMessage
-                    message={message.content}
-                    isBot={message.isBot}
-                    timestamp={message.timestamp}
-                    healthRelated={message.healthRelated}
-                    onEdit={!message.isBot ? handleEditMessage : undefined}
-                    userAvatar={(profile as { avatar?: string } | null)?.avatar || '/avatars/user-1.svg'}
-                  />
+          <>
+            <ScrollArea className="flex-1 overflow-y-auto" ref={scrollAreaRef}>
+              <div className="min-h-full mx-auto px-4 sm:px-6 lg:px-8 xl:px-16 py-8" style={{ maxWidth: 900 }}>
+                {messages.map((message, index) => (
+                  <div key={message.id}>
+                    {/* Show divider after complete exchanges (before new user questions) */}
+                    {index > 0 && !message.isBot && messages[index - 1]?.isBot && (
+                      <div className="border-t border-border/50 my-8" />
+                    )}
+                    <div className={message.isBot ? 'animate-fade-in' : ''}>
+                      {!message.isBot ? (
+                      <>
+                        <div className="mb-6">
+                          <h1 className="text-lg sm:text-xl md:text-[22px] font-normal text-foreground leading-tight">{message.content}</h1>
+                        </div>
+                        {/* Show sources right after question if next message is bot with sources */}
+                        {messages[index + 1]?.isBot && messages[index + 1]?.sources && (
+                          <SourcesDisplay sources={messages[index + 1].sources} className="mb-4" />
+                        )}
+                      </>
+                    ) : (
+                      <ChatMessage
+                        message={message.content}
+                        isBot={message.isBot}
+                        timestamp={message.timestamp}
+                        healthRelated={message.healthRelated}
+                        onEdit={undefined}
+                        userAvatar={undefined}
+                        thinkingMode={thinkingMode}
+                        thinkingLabel={thinkingLabel}
+                        sources={undefined} // Don't show sources in ChatMessage anymore
+                      />
+                    )}
+                    </div>
+                  </div>
+                ))}
+              {/* Show loading below user message */}
+              {isLoading && !streamController && messages.length > 0 && messages[messages.length - 1].isBot === false && (
+                <div className="mt-8 flex justify-center">
+                  <div className="flex items-center gap-2 text-muted-foreground">
+                    <div className="flex gap-1">
+                      <div className="w-2 h-2 bg-primary rounded-full animate-bounce" style={{animationDelay: '0ms'}} />
+                      <div className="w-2 h-2 bg-primary rounded-full animate-bounce" style={{animationDelay: '150ms'}} />
+                      <div className="w-2 h-2 bg-primary rounded-full animate-bounce" style={{animationDelay: '300ms'}} />
+                    </div>
+                    <span className="text-sm">{thinkingLabel}</span>
+                  </div>
                 </div>
-              ))}
-              {isLoading && !streamController && (
-                <ChatMessage
-                  message=""
-                  isBot={true}
-                  timestamp={new Date()}
-                  isThinking={true}
-                />
               )}
-            </div>
-          </ScrollArea>
+              </div>
+            </ScrollArea>
+            {showScrollButton && (
+              <Button
+                onClick={() => scrollToBottom(true)}
+                className="absolute bottom-24 right-6 rounded-full shadow-lg"
+                size="icon"
+                variant="secondary"
+              >
+                <ChevronDown className="h-4 w-4" />
+              </Button>
+            )}
+          </>
         )}
         {/* Input aligned to chat column width, not global viewport */}
         <ChatInput

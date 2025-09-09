@@ -75,5 +75,5 @@ export default function Login() {
     </div>
   );
 
-  return <AuthLayout form={form} info={info} initialSide="left" />;
+  return <AuthLayout form={form} info={info} initialSide="left" busy={loading} />;
 }

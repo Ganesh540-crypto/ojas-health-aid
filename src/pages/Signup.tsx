@@ -68,5 +68,5 @@ export default function Signup() {
     </div>
   );
 
-  return <AuthLayout form={form} info={info} initialSide="right" />;
+  return <AuthLayout form={form} info={info} initialSide="right" busy={loading} />;
 }
