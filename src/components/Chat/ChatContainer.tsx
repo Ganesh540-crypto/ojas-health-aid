@@ -49,11 +49,14 @@ const ChatContainer = () => {
     if (scrollAreaRef.current) {
       const scrollContainer = scrollAreaRef.current.querySelector('[data-radix-scroll-area-viewport]');
       if (scrollContainer) {
-        if (smooth) {
-          scrollContainer.scrollTo({ top: scrollContainer.scrollHeight, behavior: 'smooth' });
-        } else {
-          scrollContainer.scrollTop = scrollContainer.scrollHeight;
-        }
+        // Use requestAnimationFrame to avoid bouncing during streaming
+        requestAnimationFrame(() => {
+          if (smooth) {
+            scrollContainer.scrollTo({ top: scrollContainer.scrollHeight, behavior: 'smooth' });
+          } else {
+            scrollContainer.scrollTop = scrollContainer.scrollHeight;
+          }
+        });
       }
     }
   };
@@ -76,20 +79,28 @@ const ChatContainer = () => {
     const scrollContainer = scrollAreaRef.current?.querySelector('[data-radix-scroll-area-viewport]');
     if (!scrollContainer) return;
     
+    let scrollTimer: NodeJS.Timeout;
     const handleScroll = () => {
-      const { scrollTop, scrollHeight, clientHeight } = scrollContainer as HTMLElement;
-      const isAtBottom = scrollHeight - scrollTop - clientHeight < 100;
-      
-      // Only update auto-scroll if we're not currently streaming
-      if (!isLoading || !streamController) {
-        setShouldAutoScroll(isAtBottom);
-      }
-      setShowScrollButton(!isAtBottom);
-      setScrollLocked(isAtBottom);
+      // Debounce scroll events to prevent bouncing
+      clearTimeout(scrollTimer);
+      scrollTimer = setTimeout(() => {
+        const { scrollTop, scrollHeight, clientHeight } = scrollContainer as HTMLElement;
+        const isAtBottom = scrollHeight - scrollTop - clientHeight < 100;
+        
+        // Don't update scroll state while streaming to prevent bouncing
+        if (!isLoading && !streamController) {
+          setShouldAutoScroll(isAtBottom);
+          setScrollLocked(isAtBottom);
+        }
+        setShowScrollButton(!isAtBottom);
+      }, 50);
     };
     
-    scrollContainer.addEventListener('scroll', handleScroll);
-    return () => scrollContainer.removeEventListener('scroll', handleScroll);
+    scrollContainer.addEventListener('scroll', handleScroll, { passive: true });
+    return () => {
+      clearTimeout(scrollTimer);
+      scrollContainer.removeEventListener('scroll', handleScroll);
+    };
   }, [isLoading, streamController]);
 
   // Load chat history for this chatId and sync memory
@@ -249,7 +260,8 @@ const ChatContainer = () => {
         if (stopped) return;
         i += chunk;
         setMessages(prev => prev.map(m => m.id === botId ? { ...m, content: full.slice(0, i) } : m));
-        if (scrollLocked) scrollToBottom(true);
+        // Only scroll every few chunks to prevent bouncing
+        if (scrollLocked && i % (chunk * 4) === 0) scrollToBottom(true);
         if (chatId && botMessageId) chatStore.updateMessage(chatId, botId, full.slice(0, i));
         if (i >= full.length) {
           clearInterval(interval);
@@ -319,7 +331,8 @@ const ChatContainer = () => {
         if (stopped) return;
         i += chunk;
         setMessages(prev => prev.map(m => m.id === botId ? { ...m, content: full.slice(0, i) } : m));
-        if (scrollLocked) scrollToBottom(true);
+        // Only scroll every few chunks to prevent bouncing
+        if (scrollLocked && i % (chunk * 4) === 0) scrollToBottom(true);
         if (chatId && botMessageId) chatStore.updateMessage(chatId, botId, full.slice(0, i));
         if (i >= full.length) {
           clearInterval(interval);
@@ -362,7 +375,7 @@ const ChatContainer = () => {
     <div className="flex flex-col h-full bg-background overflow-hidden" aria-busy={isLoading || chatLoading ? true : undefined} data-loading={isLoading || chatLoading ? 'true' : undefined}>
       <ChatHeader />
       {/* Controls removed; managed in Settings dialog */}
-      <div className="flex-1 overflow-hidden flex flex-col">
+      <div className="flex-1 min-h-0 overflow-hidden flex flex-col">
         {chatLoading && (
           <div className="flex-1 flex flex-col items-center justify-center gap-2 text-xs text-muted-foreground">
             <span>Loading chat…</span>

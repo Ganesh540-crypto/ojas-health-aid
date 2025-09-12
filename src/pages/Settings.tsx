@@ -4,7 +4,7 @@ import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
-import { Sun, Moon, Monitor, Bell, Save, LogOut, Check } from "lucide-react";
+import { Sun, Moon, Monitor, Bell, Shield, User, LogOut, ChevronRight, Palette, Info } from "lucide-react";
 import { auth } from "@/lib/firebase";
 import { signOut } from "firebase/auth";
 import {
@@ -25,17 +25,27 @@ const LS_SETTINGS = 'ojas.settings.v1';
 type SettingsState = {
   notifications: boolean;
   theme: 'light' | 'dark' | 'system';
+  autoSave: boolean;
+  soundEffects: boolean;
 };
 
 export default function Settings() {
-  const [state, setState] = useState<SettingsState>({ notifications: true, theme: 'system' });
-  const [saved, setSaved] = useState(false);
+  const [state, setState] = useState<SettingsState>({ 
+    notifications: true, 
+    theme: 'system',
+    autoSave: true,
+    soundEffects: false
+  });
   const { toast } = useToast();
+  const user = auth.currentUser;
 
   useEffect(() => {
     try {
       const raw = localStorage.getItem(LS_SETTINGS);
-      if (raw) setState(JSON.parse(raw) as SettingsState);
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        setState(prev => ({ ...prev, ...parsed }));
+      }
     } catch {
       // ignore malformed localStorage
     }
@@ -55,151 +65,205 @@ export default function Settings() {
     applyTheme(state.theme);
   }, [state.theme]);
 
-  const save = () => {
-    localStorage.setItem(LS_SETTINGS, JSON.stringify(state));
-    setSaved(true);
-    toast({
-      title: "Settings saved",
-      description: "Your preferences have been updated.",
-    });
-    setTimeout(() => setSaved(false), 2000);
+  useEffect(() => {
+    // Auto-save settings when changed
+    if (state.autoSave) {
+      localStorage.setItem(LS_SETTINGS, JSON.stringify(state));
+    }
+  }, [state]);
+
+  const handleToggle = (key: keyof SettingsState) => {
+    setState(prev => ({ ...prev, [key]: !prev[key] }));
+    if (state.autoSave) {
+      toast({
+        description: "Settings updated",
+        duration: 1500,
+      });
+    }
   };
 
   return (
     <div className="min-h-screen bg-background">
-      <div className="max-w-4xl mx-auto p-4 sm:p-6 lg:p-8">
-        <Card className="shadow-lg border">
-          <CardHeader className="pb-6">
-            <CardTitle className="font-hero text-2xl sm:text-3xl">Settings</CardTitle>
-            <CardDescription>Customize your Ojas experience</CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-6">
-            {/* Notifications Section */}
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 p-4 rounded-lg bg-muted/30">
-              <div className="space-y-1">
-                <Label className="flex items-center gap-2 text-base">
-                  <Bell className="h-4 w-4" /> 
-                  Notifications
-                </Label>
-                <p className="text-sm text-muted-foreground">Enable important alerts and updates</p>
+      <div className="max-w-2xl mx-auto p-4 sm:p-6 lg:p-8">
+        {/* Header */}
+        <div className="mb-8">
+          <h1 className="text-3xl font-bold tracking-tight">Settings</h1>
+          <p className="text-muted-foreground mt-2">Manage your preferences and account</p>
+        </div>
+
+        {/* Settings Cards */}
+        <div className="space-y-4">
+          {/* Appearance */}
+          <Card>
+            <CardHeader>
+              <div className="flex items-center gap-2">
+                <Palette className="h-5 w-5 text-primary" />
+                <CardTitle className="text-lg">Appearance</CardTitle>
               </div>
-              <Switch 
-                checked={state.notifications} 
-                onCheckedChange={(v) => setState({ ...state, notifications: v })} 
-                className="ml-auto"
-              />
-            </div>
-
-            <Separator />
-
-            {/* Theme Section */}
-            <div className="space-y-4">
-              <Label className="text-base">Theme Preference</Label>
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                <Button 
-                  variant={state.theme === 'light' ? 'default' : 'outline'} 
-                  className={`transition-all ${state.theme === 'light' ? 'ring-2 ring-primary ring-offset-2' : ''}`}
-                  onClick={() => setState({ ...state, theme: 'light' })}
-                >
-                  <Sun className="h-4 w-4 mr-2" /> 
-                  Light
-                </Button>
-                <Button 
-                  variant={state.theme === 'dark' ? 'default' : 'outline'}
-                  className={`transition-all ${state.theme === 'dark' ? 'ring-2 ring-primary ring-offset-2' : ''}`}
-                  onClick={() => setState({ ...state, theme: 'dark' })}
-                >
-                  <Moon className="h-4 w-4 mr-2" /> 
-                  Dark
-                </Button>
-                <Button 
-                  variant={state.theme === 'system' ? 'default' : 'outline'}
-                  className={`transition-all ${state.theme === 'system' ? 'ring-2 ring-primary ring-offset-2' : ''}`}
-                  onClick={() => setState({ ...state, theme: 'system' })}
-                >
-                  <Monitor className="h-4 w-4 mr-2" /> 
-                  System
-                </Button>
+              <CardDescription>Customize how Ojas looks on your device</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="space-y-3">
+                <Label className="text-sm font-medium">Theme</Label>
+                <div className="grid grid-cols-3 gap-2">
+                  <Button 
+                    variant={state.theme === 'light' ? 'default' : 'outline'} 
+                    size="sm"
+                    onClick={() => setState({ ...state, theme: 'light' })}
+                    className="w-full"
+                  >
+                    <Sun className="h-4 w-4 mr-2" /> 
+                    Light
+                  </Button>
+                  <Button 
+                    variant={state.theme === 'dark' ? 'default' : 'outline'}
+                    size="sm"
+                    onClick={() => setState({ ...state, theme: 'dark' })}
+                    className="w-full"
+                  >
+                    <Moon className="h-4 w-4 mr-2" /> 
+                    Dark
+                  </Button>
+                  <Button 
+                    variant={state.theme === 'system' ? 'default' : 'outline'}
+                    size="sm"
+                    onClick={() => setState({ ...state, theme: 'system' })}
+                    className="w-full"
+                  >
+                    <Monitor className="h-4 w-4 mr-2" /> 
+                    Auto
+                  </Button>
+                </div>
               </div>
-            </div>
+            </CardContent>
+          </Card>
 
-            <Separator />
-
-            {/* Save Section */}
-            <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 p-4 rounded-lg bg-muted/10">
-              <div className="space-y-1">
-                <p className="text-sm font-medium">Save Preferences</p>
-                <p className="text-xs text-muted-foreground">Apply your settings changes</p>
+          {/* Preferences */}
+          <Card>
+            <CardHeader>
+              <div className="flex items-center gap-2">
+                <Bell className="h-5 w-5 text-primary" />
+                <CardTitle className="text-lg">Preferences</CardTitle>
               </div>
-              <div className="flex gap-2 w-full sm:w-auto">
-                <AlertDialog>
-                  <AlertDialogTrigger asChild>
-                    <Button variant="outline" className="flex-1 sm:flex-none">
-                      Reset
-                    </Button>
-                  </AlertDialogTrigger>
-                  <AlertDialogContent>
-                    <AlertDialogHeader>
-                      <AlertDialogTitle>Reset Settings?</AlertDialogTitle>
-                      <AlertDialogDescription>
-                        This will reload the page and reset all settings to their defaults.
-                      </AlertDialogDescription>
-                    </AlertDialogHeader>
-                    <AlertDialogFooter>
-                      <AlertDialogCancel>Cancel</AlertDialogCancel>
-                      <AlertDialogAction onClick={() => window.location.reload()}>
-                        Reset
-                      </AlertDialogAction>
-                    </AlertDialogFooter>
-                  </AlertDialogContent>
-                </AlertDialog>
-                <Button 
-                  onClick={save} 
-                  className="flex-1 sm:flex-none transition-all"
-                  disabled={saved}
-                >
-                  {saved ? (
-                    <><Check className="h-4 w-4 mr-2" /> Saved</>
-                  ) : (
-                    <><Save className="h-4 w-4 mr-2" /> Save</>
-                  )}
-                </Button>
+              <CardDescription>Control your Ojas experience</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-1">
+              <div className="flex items-center justify-between py-3">
+                <div className="space-y-1">
+                  <Label className="text-sm font-medium">Notifications</Label>
+                  <p className="text-xs text-muted-foreground">Get alerts for important updates</p>
+                </div>
+                <Switch 
+                  checked={state.notifications} 
+                  onCheckedChange={() => handleToggle('notifications')}
+                />
               </div>
-            </div>
-
-            <Separator />
-
-            {/* Account Section */}
-            <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 p-4 rounded-lg bg-muted/10">
-              <div className="space-y-1">
-                <Label className="text-base">Account</Label>
-                <p className="text-sm text-muted-foreground">Manage your account settings</p>
+              <Separator />
+              <div className="flex items-center justify-between py-3">
+                <div className="space-y-1">
+                  <Label className="text-sm font-medium">Auto-save</Label>
+                  <p className="text-xs text-muted-foreground">Automatically save settings changes</p>
+                </div>
+                <Switch 
+                  checked={state.autoSave} 
+                  onCheckedChange={() => handleToggle('autoSave')}
+                />
               </div>
+              <Separator />
+              <div className="flex items-center justify-between py-3">
+                <div className="space-y-1">
+                  <Label className="text-sm font-medium">Sound effects</Label>
+                  <p className="text-xs text-muted-foreground">Play sounds for interactions</p>
+                </div>
+                <Switch 
+                  checked={state.soundEffects} 
+                  onCheckedChange={() => handleToggle('soundEffects')}
+                />
+              </div>
+            </CardContent>
+          </Card>
+
+          {/* Account */}
+          <Card>
+            <CardHeader>
+              <div className="flex items-center gap-2">
+                <User className="h-5 w-5 text-primary" />
+                <CardTitle className="text-lg">Account</CardTitle>
+              </div>
+              <CardDescription>Manage your account and security</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-1">
+              {user && (
+                <div className="py-3">
+                  <Label className="text-sm font-medium">Email</Label>
+                  <p className="text-sm text-muted-foreground mt-1">{user.email}</p>
+                </div>
+              )}
+              <Separator />
+              <button className="flex items-center justify-between w-full py-3 hover:bg-muted/50 rounded-lg px-2 -mx-2 transition-colors">
+                <div className="flex items-center gap-3">
+                  <Shield className="h-4 w-4 text-muted-foreground" />
+                  <div className="text-left">
+                    <p className="text-sm font-medium">Privacy & Security</p>
+                    <p className="text-xs text-muted-foreground">Manage data and privacy settings</p>
+                  </div>
+                </div>
+                <ChevronRight className="h-4 w-4 text-muted-foreground" />
+              </button>
+              <Separator />
               <AlertDialog>
                 <AlertDialogTrigger asChild>
-                  <Button variant="outline" className="w-full sm:w-auto">
-                    <LogOut className="h-4 w-4 mr-2" /> 
-                    Sign out
-                  </Button>
+                  <button className="flex items-center justify-between w-full py-3 hover:bg-muted/50 rounded-lg px-2 -mx-2 transition-colors text-red-600 dark:text-red-400">
+                    <div className="flex items-center gap-3">
+                      <LogOut className="h-4 w-4" />
+                      <p className="text-sm font-medium">Sign out</p>
+                    </div>
+                  </button>
                 </AlertDialogTrigger>
                 <AlertDialogContent>
                   <AlertDialogHeader>
-                    <AlertDialogTitle>Sign Out?</AlertDialogTitle>
+                    <AlertDialogTitle>Sign out of Ojas?</AlertDialogTitle>
                     <AlertDialogDescription>
-                      Are you sure you want to sign out of your account?
+                      You'll need to sign in again to access your chats and preferences.
                     </AlertDialogDescription>
                   </AlertDialogHeader>
                   <AlertDialogFooter>
                     <AlertDialogCancel>Cancel</AlertDialogCancel>
-                    <AlertDialogAction onClick={() => signOut(auth)}>
-                      Sign Out
+                    <AlertDialogAction onClick={() => signOut(auth)} className="bg-red-600 hover:bg-red-700">
+                      Sign out
                     </AlertDialogAction>
                   </AlertDialogFooter>
                 </AlertDialogContent>
               </AlertDialog>
-            </div>
-          </CardContent>
-        </Card>
+            </CardContent>
+          </Card>
+
+          {/* About */}
+          <Card>
+            <CardHeader>
+              <div className="flex items-center gap-2">
+                <Info className="h-5 w-5 text-primary" />
+                <CardTitle className="text-lg">About</CardTitle>
+              </div>
+            </CardHeader>
+            <CardContent>
+              <div className="space-y-3 text-sm">
+                <div className="flex justify-between">
+                  <span className="text-muted-foreground">Version</span>
+                  <span className="font-medium">1.0.0</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-muted-foreground">Model</span>
+                  <span className="font-medium">Gemini 2.0 Flash</span>
+                </div>
+                <Separator />
+                <p className="text-xs text-muted-foreground">
+                  Ojas AI Assistant by MedTrack • © 2025
+                </p>
+              </div>
+            </CardContent>
+          </Card>
+        </div>
       </div>
     </div>
   );

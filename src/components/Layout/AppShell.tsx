@@ -193,7 +193,7 @@ export default function AppShell() {
           </DropdownMenu>
         </SidebarFooter>
       </Sidebar>
-      <SidebarInset className="h-screen overflow-hidden">
+      <SidebarInset className="h-screen flex flex-col overflow-hidden">
         <Outlet />
       </SidebarInset>
 
