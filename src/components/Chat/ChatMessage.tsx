@@ -188,9 +188,13 @@ const ChatMessage = ({ message, isBot, timestamp, isThinking, healthRelated, onE
                   "prose-pre:bg-muted prose-pre:p-3 prose-pre:rounded-lg prose-pre:overflow-x-auto prose-pre:my-5 prose-pre:text-sm",
                   // Other elements
                   "prose-blockquote:border-l-4 prose-blockquote:border-primary prose-blockquote:pl-4 prose-blockquote:py-2 prose-blockquote:italic prose-blockquote:my-4",
-                  "prose-table:my-5 prose-table:w-full prose-table:border-collapse",
-                  "prose-th:border prose-th:border-border prose-th:px-3 prose-th:py-2 prose-th:text-left prose-th:font-medium prose-th:text-sm",
-                  "prose-td:border prose-td:border-border prose-td:px-3 prose-td:py-2 prose-td:text-sm",
+                  // Enhanced table styling for better UI
+                  "prose-table:my-6 prose-table:w-full prose-table:overflow-hidden prose-table:rounded-lg prose-table:border prose-table:border-border",
+                  "prose-thead:bg-muted/50",
+                  "prose-th:border-b prose-th:border-border prose-th:px-4 prose-th:py-3 prose-th:text-left prose-th:font-medium prose-th:text-sm prose-th:text-foreground",
+                  "prose-td:border-b prose-td:border-border prose-td:px-4 prose-td:py-3 prose-td:text-sm prose-td:text-foreground",
+                  "prose-tbody:divide-y prose-tbody:divide-border",
+                  "prose-tr:hover:bg-muted/20 prose-tr:transition-colors",
                   "prose-img:rounded-lg prose-img:my-5",
                   "prose-hr:my-8 prose-hr:border-border",
                   "prose-strong:font-medium",
@@ -216,6 +220,32 @@ const ChatMessage = ({ message, isBot, timestamp, isThinking, healthRelated, onE
                       code: ({ children }) => <code className="bg-muted px-1.5 py-0.5 rounded text-[13px] md:text-sm font-mono text-foreground break-words">{children}</code>,
                       pre: ({ children }) => <pre className="bg-muted p-4 rounded-lg overflow-x-auto mb-5 text-[13px] md:text-sm leading-relaxed text-foreground">{children}</pre>,
                       blockquote: ({ children }) => <blockquote className="border-l-4 border-primary/60 pl-5 italic mb-5 text-muted-foreground">{children}</blockquote>,
+                      table: ({ children }) => (
+                        <div className="my-6 w-full overflow-x-auto">
+                          <table className="w-full min-w-[500px] border-separate border-spacing-0 overflow-hidden rounded-lg border border-border bg-background shadow-sm">
+                            {children}
+                          </table>
+                        </div>
+                      ),
+                      thead: ({ children }) => (
+                        <thead className="bg-muted/50">{children}</thead>
+                      ),
+                      tbody: ({ children }) => (
+                        <tbody className="divide-y divide-border">{children}</tbody>
+                      ),
+                      tr: ({ children }) => (
+                        <tr className="transition-colors hover:bg-muted/20">{children}</tr>
+                      ),
+                      th: ({ children }) => (
+                        <th className="border-b border-border px-4 py-3 text-left text-sm font-semibold text-foreground">
+                          {children}
+                        </th>
+                      ),
+                      td: ({ children }) => (
+                        <td className="border-b border-border px-4 py-3 text-sm text-foreground">
+                          {children}
+                        </td>
+                      ),
                       a: ({ href, children }) => {
                         const raw = String(href || '');
                         const clean = unwrapRedirect(raw);
