@@ -9,6 +9,9 @@ const API_KEY: string = (import.meta.env?.VITE_GEMINI_API_KEY as string) || '';
 
 type Decision = 'casual' | 'critical';
 
+// Strict type for Gemini content history parts to prevent 'role' from widening to string
+type GenAIHistoryPart = { role: 'user' | 'model'; parts: { text: string }[] };
+
 interface RouteResult {
   content: string; // assistant text
   isHealthRelated: boolean;
@@ -55,12 +58,13 @@ class AIRouter {
       
       const profile = profileStore.get();
       const profileSummary = this.buildProfileSummary(profile);
+      const hpIntake: GenAIHistoryPart[] = [
+        ...(contextPack ? [{ role: 'user' as const, parts: [{ text: contextPack }] }] : []),
+        ...(profileSummary ? [{ role: 'user' as const, parts: [{ text: profileSummary }] }] : []),
+        ...memoryStore.getHistoryParts(),
+      ];
       const resp = await geminiSearchService.generateResponse(message, {
-        historyParts: [
-          ...(contextPack ? [{ role: 'user', parts: [{ text: contextPack }] }] : []),
-          ...(profileSummary ? [{ role: 'user', parts: [{ text: profileSummary }] }] : []),
-          ...memoryStore.getHistoryParts()
-        ],
+        historyParts: hpIntake,
         forceSearch: true // Force web search for intake answer processing
       });
       
@@ -125,11 +129,12 @@ class AIRouter {
       }
 
       // Use full model for health-related expertise with mandatory web search
+      const hpHealth: GenAIHistoryPart[] = [
+        ...(profileSummary ? [{ role: 'user' as const, parts: [{ text: profileSummary }] }] : []),
+        ...memoryStore.getHistoryParts(),
+      ];
       const resp = await geminiSearchService.generateResponse(message, {
-        historyParts: [
-          ...(profileSummary ? [{ role: 'user', parts: [{ text: profileSummary }] }] : []),
-          ...memoryStore.getHistoryParts()
-        ],
+        historyParts: hpHealth,
         forceSearch: true // Always search for health queries
       });
 

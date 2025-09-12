@@ -10,7 +10,7 @@ const API_KEY = (import.meta.env?.VITE_GEMINI_API_KEY as string) || '';
 export class GeminiService {
   private ai: GoogleGenAI;
   private model: string = 'gemini-2.5-flash';
-  private conversationHistory: Array<{role: string, parts: Array<{text: string}>}> = [];
+  private conversationHistory: Array<{ role: 'user' | 'model'; parts: Array<{ text: string }> }> = [];
   private conversationMemory: string[] = [];
 
   constructor() {

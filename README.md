@@ -1,99 +1,107 @@
-# Welcome to your Lovable project
+# Ojas AI — Healthcare & Wellness Assistant
 
-## Project info
+Ojas is a professional healthcare and wellness AI assistant created by MedTrack (VISTORA TRAYANA LLP). It provides safe, structured guidance for everyday health questions, lifestyle, and wellbeing — with a warm, professional tone.
 
-**URL**: https://lovable.dev/projects/79636bec-bc40-4aba-8e70-979fe8ed8762
+This page explains the product at a high level for people curious about Ojas before launch. It is not a technical guide.
 
-## How can I edit this code?
+## At a glance
 
-There are several ways of editing your application.
+- Helps you understand symptoms, lifestyle changes, and general health questions in simple language.
+- Uses trusted, up‑to‑date information and shows a Sources panel for transparency.
+- India‑first context and examples where relevant.
+- Clear structure, easy‑to‑scan answers, and gentle follow‑up questions when helpful.
+- Knowledge cutoff: May 2024. If recency matters, Ojas searches the web for current information and presents sources.
+- Safety‑aware: compassionate but careful. Ojas does not diagnose or prescribe.
 
-**Use Lovable**
+## What is Ojas?
 
-Simply visit the [Lovable Project](https://lovable.dev/projects/79636bec-bc40-4aba-8e70-979fe8ed8762) and start prompting.
+Ojas is your AI companion for everyday health and wellness. It combines current medical information with practical, down‑to‑earth guidance so you know what to do next — from home remedies and precautions to when to seek professional care.
 
-Changes made via Lovable will be committed automatically to this repo.
+Think of Ojas as a knowledgeable guide that explains, organizes, and helps you make informed decisions. It’s designed to be professional, approachable, and genuinely useful — not gimmicky.
 
-**Use your preferred IDE**
+## Who is Ojas for?
 
-If you want to work locally using your own IDE, you can clone this repo and push changes. Pushed changes will also be reflected in Lovable.
+- Individuals and families who want clear, dependable health information.
+- People managing ongoing conditions who want everyday tips and smarter questions to ask their doctor.
+- Anyone building better habits around sleep, diet, fitness, and stress.
+- Caregivers who need simple explanations and checklists.
 
-The only requirement is having Node.js & npm installed - [install with nvm](https://github.com/nvm-sh/nvm#installing-and-updating)
+## What Ojas can help with
 
-Follow these steps:
+- Understanding common symptoms and when they may be concerning.
+- Practical relief strategies, precautions, and lifestyle adjustments.
+- Education about conditions, tests, and treatment options (in plain language).
+- Daily wellness: nutrition, fitness, sleep, mental wellbeing basics.
+- Women’s health, senior care considerations, child and adolescent health basics.
+- General knowledge, planning, and step‑by‑step how‑tos when relevant.
 
-```sh
-# Step 1: Clone the repository using the project's Git URL.
-git clone <YOUR_GIT_URL>
+## How Ojas works (high‑level)
 
-# Step 2: Navigate to the project directory.
-cd <YOUR_PROJECT_NAME>
+Ojas gives structured, easy‑to‑read answers and, when needed, asks a few short questions to tailor guidance. It knows its knowledge cutoff is May 2024, so it searches the web for newer facts and shows a Sources panel you can inspect. Sources are displayed separately so the answer remains clean and readable.
 
-# Step 3: Install the necessary dependencies.
-npm i
+Ojas aims to be India‑aware, sensitive to context, and consistent in tone. It avoids jargon where possible and focuses on clarity, safety, and empathy.
 
-# Step 4: Start the development server with auto-reloading and an instant preview.
-npm run dev
-```
+## Safety and medical guidance
 
-**Edit a file directly in GitHub**
+- Ojas provides general information to help you make informed decisions. It is not a doctor and does not replace professional medical care.
+- For emergencies (severe chest pain, breathing difficulty, stroke symptoms, heavy bleeding, allergic reactions), seek urgent medical help immediately.
+- Ojas avoids giving dosing instructions and does not prescribe medications.
+- Mental health is important. If you’re in crisis, seek immediate professional help or local emergency services.
 
-- Navigate to the desired file(s).
-- Click the "Edit" button (pencil icon) at the top right of the file view.
-- Make your changes and commit the changes.
+## Privacy and data handling
 
-**Use GitHub Codespaces**
+We take privacy seriously. Ojas is designed so you remain in control of your conversations.
 
-- Navigate to the main page of your repository.
-- Click on the "Code" button (green button) near the top right.
-- Select the "Codespaces" tab.
-- Click on "New codespace" to launch a new Codespace environment.
-- Edit files directly within the Codespace and commit and push your changes once you're done.
+- Your chats are saved to your account so you can continue where you left off.
+- We use secure connections and reputable cloud infrastructure.
+- We don’t sell your personal conversation data.
+- You can manage your chat history from within the app.
 
-## What technologies are used for this project?
+Note: Please avoid sharing highly sensitive personal details unless necessary. Ojas is not intended to store protected health information for clinical use.
 
-This project is built with:
+## Current status and roadmap
 
-- Vite
-- TypeScript
-- React
-- shadcn-ui
-- Tailwind CSS
+Ojas is in active development and pre‑launch. We’re focused on:
 
-## Firebase Realtime Database rules (fix PERMISSION_DENIED)
+- Improving accuracy and clarity for common health questions.
+- Enhancing Indian context and practical, real‑world tips.
+- Better personalization through short, optional intake questions for health topics.
+- Continued improvements to transparency with helpful source previews.
 
-If you see PERMISSION_DENIED when saving profile or chats, set RTDB rules so users can only read/write their own data:
+Planned next steps:
 
-Files included:
+- Multi‑language support.
+- Optional voice read‑outs of answers.
+- Gentle reminders and checklists for daily habits.
+- Caregiver mode for families.
+- Simple pathways to consult professionals when needed.
 
-- `firebase.json`
-- `database.rules.json`
+## Frequently asked questions (FAQ)
 
-Rules grant access to `users/$uid/**` only to the authenticated user with the same uid. Deploy them with the Firebase CLI:
+1) Is Ojas a doctor?
 
-1) Install Firebase CLI and initialize login once
+No. Ojas provides general health information and practical guidance. It does not diagnose, treat, or prescribe. Always consult a qualified professional for medical advice.
 
-	npm install -g firebase-tools
-	firebase login
+2) How current is the information?
 
-2) Set your default project (replace with your Firebase project ID)
+Ojas has a knowledge cutoff of May 2024. When up‑to‑date information matters (e.g., new guidelines or recent news), it performs a quick web search and shows a Sources panel for transparency.
 
-	firebase use <your-project-id>
+3) Where does the information come from?
 
-3) Deploy database rules from this repo root
+Ojas combines general medical knowledge with reputable online sources. You’ll see a Sources panel alongside answers when web search is used.
 
-	firebase deploy --only database
+4) Is my data private?
 
-Make sure your app uses the same project in `.env` VITE_FIREBASE_* values.
+Your chat history is tied to your account so you can pick up where you left off. We use secure, modern cloud infrastructure and do not sell your personal conversation data.
 
-## How can I deploy this project?
+5) Does Ojas work outside India?
 
-Simply open [Lovable](https://lovable.dev/projects/79636bec-bc40-4aba-8e70-979fe8ed8762) and click on Share -> Publish.
+Ojas is designed with an India‑first mindset but can help with general health topics anywhere. Always follow local medical guidance and regulations.
 
-## Can I connect a custom domain to my Lovable project?
+## Contact
 
-Yes, you can!
+Questions about Ojas or early access? Please add your preferred contact details here (email, website, or social). We’ll update this section at launch.
 
-To connect a domain, navigate to Project > Settings > Domains and click Connect Domain.
+---
 
-Read more here: [Setting up a custom domain](https://docs.lovable.dev/tips-tricks/custom-domain#step-by-step-guide)
+Disclaimer: Ojas provides general health information to support better decisions. It is not a substitute for professional medical advice, diagnosis, or treatment. In an emergency, seek immediate care.
