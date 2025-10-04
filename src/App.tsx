@@ -14,6 +14,8 @@ import { auth } from "@/lib/firebase";
 import { chatStore } from "@/lib/chatStore";
 const AuthPage = React.lazy(() => import('./pages/Auth'));
 import NotFound from "./pages/NotFound";
+import VoiceMode from "./pages/VoiceMode";
+import FlowDemo from "./pages/FlowDemo";
 
 const queryClient = new QueryClient();
 
@@ -94,6 +96,10 @@ const App = () => {
             <Route path="/login" element={<React.Suspense fallback={<div className="h-screen flex items-center justify-center text-sm text-muted-foreground">Loading auth…</div>}><AuthPage /></React.Suspense>} />
             <Route path="/signup" element={<React.Suspense fallback={<div className="h-screen flex items-center justify-center text-sm text-muted-foreground">Loading auth…</div>}><AuthPage /></React.Suspense>} />
             <Route path="/onboarding" element={<RequireAuth><Onboarding /></RequireAuth>} />
+            {/* Full-screen Voice Mode (no AppShell / sidebar) */}
+            <Route path="/voice" element={<RequireAuth><VoiceMode /></RequireAuth>} />
+            {/* Full-screen Flow Demo (no AppShell / sidebar) */}
+            <Route path="/flow-demo" element={<RequireAuth><FlowDemo /></RequireAuth>} />
             <Route element={<RequireAuth><RequireProfile><AppShell /></RequireProfile></RequireAuth>}>
               <Route path="/" element={<Index />} />
               <Route path="/chat/:chatId" element={<Index />} />

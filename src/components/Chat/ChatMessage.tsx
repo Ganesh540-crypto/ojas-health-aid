@@ -1,7 +1,8 @@
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { cn } from "@/lib/utils";
-import { User, Edit3, ExternalLink, Volume2 } from "lucide-react";
+import { User, Edit3, ExternalLink, Volume2, ChevronDown, ChevronRight, Globe, Search } from "lucide-react";
+import { useState, useEffect, useRef } from 'react';
 import { format } from "date-fns";
 import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
@@ -9,8 +10,9 @@ import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
-import ThinkingLoader from '@/components/Chat/ThinkingLoader';
+import { LoadingAnimation } from '@/components/ui/loading-animation';
 import SourcesDisplay from '@/components/Chat/SourcesDisplay';
+import ThoughtsPanel from '@/components/Chat/ThoughtsPanel';
 
 interface ChatMessageProps {
   message: string;
@@ -22,13 +24,16 @@ interface ChatMessageProps {
   userAvatar?: string;
   className?: string; // for parent-controlled scaling
   // Loader customization when isThinking is true
-  thinkingMode?: 'thinking' | 'searching';
+  thinkingMode?: 'routing' | 'thinking' | 'searching' | 'analyzing';
   thinkingLabel?: string;
   sources?: Array<{ title: string; url: string; snippet?: string; displayUrl?: string }>;
+  // Optional generation meta (thoughts, search queries, steps)
+  metaItems?: Array<{ type: 'step' | 'thought' | 'search_query'; text?: string; query?: string; ts?: number }>;
+  metaOpen?: boolean;
+  onToggleMeta?: () => void;
 }
 
 import { synthesizeSpeech, speakSmart } from '@/lib/tts';
-import { useState } from 'react';
 
 // --- Helpers to keep links short and direct ---
 function unwrapRedirect(raw: string): string {
@@ -122,10 +127,45 @@ function preprocessMessageForSources(text: string): string {
   }
 }
 
-const ChatMessage = ({ message, isBot, timestamp, isThinking, healthRelated, onEdit, userAvatar, className, thinkingMode, thinkingLabel, sources }: ChatMessageProps) => {
+const ChatMessage = ({ message, isBot, timestamp, isThinking, healthRelated, onEdit, userAvatar, className, thinkingMode, thinkingLabel, sources, metaItems, metaOpen, onToggleMeta }: ChatMessageProps) => {
   const [isSpeaking, setIsSpeaking] = useState(false);
   const [audioUrl, setAudioUrl] = useState<string | null>(null);
   const [usedFallback, setUsedFallback] = useState(false);
+  const [showThoughts, setShowThoughts] = useState(false);
+  const [isTransitioning, setIsTransitioning] = useState(false);
+  const [wasThinking, setWasThinking] = useState(false);
+  const [manualToggle, setManualToggle] = useState(false);
+  
+  // Auto-expand thoughts when available and thinking
+  useEffect(() => {
+    if (isThinking && metaItems && metaItems.length > 0 && !manualToggle) {
+      setShowThoughts(true);
+      setWasThinking(true);
+    }
+  }, [isThinking, metaItems, manualToggle]);
+  
+  // Auto-collapse when main response starts streaming (but keep collecting thoughts internally)
+  useEffect(() => {
+    if (message && message.length > 30 && isThinking && showThoughts && !manualToggle) {
+      // Main response is streaming, auto-collapse thoughts
+      setShowThoughts(false);
+      setWasThinking(true);
+    }
+  }, [message, isThinking, showThoughts, manualToggle]);
+  
+  // Keep thoughts collapsed when thinking finishes
+  useEffect(() => {
+    if (!isThinking && wasThinking && !manualToggle) {
+      setShowThoughts(false);
+    }
+  }, [isThinking, wasThinking, manualToggle]);
+  
+  // ThoughtsPanel handles its own scrolling behavior
+  
+  const handleToggleThoughts = () => {
+    setManualToggle(true);
+    setShowThoughts(!showThoughts);
+  };
 
   const handleSpeak = async () => {
     if (isSpeaking) return;
@@ -150,21 +190,59 @@ const ChatMessage = ({ message, isBot, timestamp, isThinking, healthRelated, onE
     }
   };
 
+  // Process markdown in thoughts
+  const renderThoughtText = (text: string) => {
+    // Convert basic markdown patterns
+    let processed = text
+      .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+      .replace(/\*(.+?)\*/g, '<em>$1</em>')
+      .replace(/`(.+?)`/g, '<code class="px-1 py-0.5 rounded bg-muted text-xs">$1</code>');
+    return <span dangerouslySetInnerHTML={{ __html: processed }} />;
+  };
+
   return (
     <div className={cn("w-full", className)}>
       {isBot && (
         <div className="w-full">
-          <div className="mb-3">
-            <span className="text-sm font-medium text-foreground">Answer</span>
-          </div>
-          <div className="w-full">
+          {/* Dynamic header that transitions from thinking to Answer */}
+          <div className="mb-3 flex items-center gap-2 transition-all duration-300">
             {isThinking ? (
-                <ThinkingLoader mode={thinkingMode ?? 'thinking'} labelOverride={thinkingLabel} className="px-2 py-1" />
-              ) : (
+              <LoadingAnimation 
+                mode={thinkingMode ?? 'thinking'} 
+                label={thinkingLabel} 
+                className="" 
+              />
+            ) : (
+              <>
+                <span className="text-sm font-medium text-foreground">Answer</span>
+                {metaItems && metaItems.length > 0 && (
+                  <button
+                    onClick={handleToggleThoughts}
+                    className="inline-flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-all duration-200"
+                    aria-expanded={showThoughts}
+                    aria-label="Toggle thinking process"
+                  >
+                    <ChevronRight className={cn(
+                      "h-3 w-3 transition-transform duration-200",
+                      showThoughts && "rotate-90"
+                    )} />
+                  </button>
+                )}
+              </>
+            )}
+          </div>
+          
+          {/* Thoughts section - extracted component */}
+          <ThoughtsPanel metaItems={metaItems} show={!!showThoughts} isThinking={!!isThinking} manualOpen={manualToggle} />
+          
+          <div className="w-full">
+            {isThinking && !message ? (
+              <div className="h-4" /> // Spacer while thinking
+            ) : (
                 <div className={cn(
                   "prose prose-sm dark:prose-invert max-w-none",
                   // Paragraphs - good spacing
-                  "prose-p:leading-relaxed prose-p:mb-4 prose-p:text-[15px]",
+                  "prose-p:leading-relaxed prose-p:mb-4 prose-p:text-[16.5px]",
                   // Headers - less bold, more spacing between sections
                   "prose-h1:mt-8 prose-h1:mb-4 prose-h1:text-xl prose-h1:font-medium",
                   "prose-h2:mt-7 prose-h2:mb-3 prose-h2:text-lg prose-h2:font-medium",
@@ -173,7 +251,7 @@ const ChatMessage = ({ message, isBot, timestamp, isThinking, healthRelated, onE
                   // Lists - better spacing and hierarchy
                   "prose-ul:my-4 prose-ul:pl-6 prose-ul:space-y-2",
                   "prose-ol:my-4 prose-ol:pl-6 prose-ol:space-y-2",
-                  "prose-li:leading-relaxed prose-li:text-[15px]",
+                  "prose-li:leading-relaxed prose-li:text-[16.5px]",
                   "prose-li:marker:text-muted-foreground",
                   // Nested lists with proper indentation
                   "prose-li>ul:mt-2 prose-li>ul:mb-0 prose-li>ul:pl-6",
@@ -190,13 +268,13 @@ const ChatMessage = ({ message, isBot, timestamp, isThinking, healthRelated, onE
                   "prose-blockquote:border-l-4 prose-blockquote:border-primary prose-blockquote:pl-4 prose-blockquote:py-2 prose-blockquote:italic prose-blockquote:my-4",
                   // Enhanced table styling for better UI
                   "prose-table:my-6 prose-table:w-full prose-table:overflow-hidden prose-table:rounded-lg prose-table:border prose-table:border-border",
-                  "prose-thead:bg-muted/50",
+                  "prose-thead:bg-muted",
                   "prose-th:border-b prose-th:border-border prose-th:px-4 prose-th:py-3 prose-th:text-left prose-th:font-medium prose-th:text-sm prose-th:text-foreground",
                   "prose-td:border-b prose-td:border-border prose-td:px-4 prose-td:py-3 prose-td:text-sm prose-td:text-foreground",
                   "prose-tbody:divide-y prose-tbody:divide-border",
-                  "prose-tr:hover:bg-muted/20 prose-tr:transition-colors",
+                  "prose-tr:hover:bg-muted prose-tr:transition-colors",
                   "prose-img:rounded-lg prose-img:my-5",
-                  "prose-hr:my-8 prose-hr:border-border",
+                  "prose-hr:my-8 prose-hr:border-border prose-hr:border-t",
                   "prose-strong:font-medium",
                   "prose-a:text-primary prose-a:underline prose-a:underline-offset-2 hover:prose-a:text-primary/80",
                   className
@@ -207,7 +285,7 @@ const ChatMessage = ({ message, isBot, timestamp, isThinking, healthRelated, onE
                       h1: ({ children }) => <h1 className="text-xl font-medium tracking-tight mt-8 mb-4 text-foreground">{children}</h1>,
                       h2: ({ children }) => <h2 className="text-lg font-medium mt-7 mb-3 text-foreground">{children}</h2>,
                       h3: ({ children }) => <h3 className="text-base font-medium mt-6 mb-2.5 text-foreground">{children}</h3>,
-                      p: ({ children }) => <p className="text-[15px] leading-relaxed mb-4 text-foreground">{children}</p>,
+                      p: ({ children }) => <p className="text-[16.5px] leading-relaxed mb-4 text-foreground">{children}</p>,
                       ul: ({ children }) => (
                         <ul className="list-disc pl-6 my-4 space-y-2 text-foreground">{children}</ul>
                       ),
@@ -228,13 +306,13 @@ const ChatMessage = ({ message, isBot, timestamp, isThinking, healthRelated, onE
                         </div>
                       ),
                       thead: ({ children }) => (
-                        <thead className="bg-muted/50">{children}</thead>
+                        <thead className="bg-muted">{children}</thead>
                       ),
                       tbody: ({ children }) => (
                         <tbody className="divide-y divide-border">{children}</tbody>
                       ),
                       tr: ({ children }) => (
-                        <tr className="transition-colors hover:bg-muted/20">{children}</tr>
+                        <tr className="transition-colors hover:bg-muted">{children}</tr>
                       ),
                       th: ({ children }) => (
                         <th className="border-b border-border px-4 py-3 text-left text-sm font-semibold text-foreground">
@@ -256,7 +334,7 @@ const ChatMessage = ({ message, isBot, timestamp, isThinking, healthRelated, onE
                             title={clean}
                             target="_blank"
                             rel="noopener noreferrer"
-                            className="inline-flex items-center gap-1 max-w-full whitespace-nowrap rounded-full border border-border bg-muted px-2 py-0.5 text-foreground no-underline hover:bg-muted/80"
+                            className="inline-flex items-center gap-1 max-w-full whitespace-nowrap rounded-full border border-border bg-muted px-2 py-0.5 text-foreground no-underline hover:bg-muted"
                           >
                             {label}
                             <ExternalLink className="h-3 w-3" />

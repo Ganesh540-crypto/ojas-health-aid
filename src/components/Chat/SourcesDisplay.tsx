@@ -1,14 +1,51 @@
 import React, { useMemo, useState } from 'react';
-import { Globe, ChevronRight } from 'lucide-react';
+import { Globe, ChevronRight, ChevronLeft } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { db } from '@/lib/firebase';
 import { ref, get, set } from 'firebase/database';
+import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet';
 
 export interface Source {
   title: string;
   url: string;
   snippet?: string;
   displayUrl?: string;
+}
+
+// Unified helper to compute resolvedUrl, siteUrl and the exact sourceKey
+function computeKeys(source: Source): { resolvedUrl: string; siteUrl: string; sourceKey: string } {
+  const resolvedUrl = resolveDestinationFromSource(source);
+  const siteUrl = preferredSiteUrl(source, resolvedUrl);
+  const sourceKey = resolvedUrl || siteUrl || source.url;
+  return { resolvedUrl, siteUrl, sourceKey };
+}
+
+// Helpers to unify how we read and write metadata so keys never miss
+type Meta = { title?: string; description?: string; image?: string };
+function normalizeSetMeta(
+  setter: React.Dispatch<React.SetStateAction<Record<string, Meta>>>,
+  source: Source,
+  keys: { resolvedUrl: string; siteUrl: string },
+  meta: Meta
+) {
+  setter((prev) => ({
+    ...prev,
+    [keys.resolvedUrl]: meta,
+    [keys.siteUrl]: meta,
+    [source.url]: meta,
+  }));
+}
+function normalizeGetMeta(
+  map: Record<string, Meta>,
+  source: Source,
+  keys: { resolvedUrl: string; siteUrl: string; sourceKey: string }
+): Meta | undefined {
+  return (
+    map[keys.sourceKey] ||
+    map[keys.resolvedUrl] ||
+    map[keys.siteUrl] ||
+    map[source.url]
+  );
 }
 
 // Lightweight localStorage helpers for caching
@@ -20,6 +57,8 @@ function getDecodedFromCache(redirectUrl: string): string | null { const m = rea
 function setDecodedInCache(redirectUrl: string, decoded: string) { const m = readLS<Record<string, string>>(DECODed_LS_KEY) || {}; m[redirectUrl] = decoded; writeLS(DECODed_LS_KEY, m); }
 function getMetaFromCache(url: string): { title?: string; description?: string; image?: string } | null { const m = readLS<Record<string, { title?: string; description?: string; image?: string }>>(META_LS_KEY); return m?.[url] || null; }
 function setMetaInCache(url: string, meta: { title?: string; description?: string; image?: string }) { const m = readLS<Record<string, { title?: string; description?: string; image?: string }>>(META_LS_KEY) || {}; m[url] = meta; writeLS(META_LS_KEY, m); }
+
+// Remove concurrency limiting to speed up fetches
 
 // DB-safe key from URL
 function keyFromUrl(u: string): string {
@@ -211,6 +250,22 @@ function isRedirectHost(host: string): boolean {
   );
 }
 
+// Detect token-like or random-looking strings (e.g., Vertex redirect tokens)
+function looksLikeToken(text?: string | null): boolean {
+  if (!text) return false;
+  const s = String(text).trim();
+  if (s.length < 12) return false;
+  const collapsed = s.replace(/\s+/g, '');
+  // Very long single run of mostly base64/url-safe chars
+  if (/^[A-Za-z0-9+/_=-]{20,}$/.test(collapsed)) return true;
+  // Long run of base64url set anywhere
+  if (/[A-Za-z0-9_-]{18,}/.test(collapsed)) return true;
+  // If almost no spaces and long, consider token-ish
+  const spaceCount = (s.match(/\s/g) || []).length;
+  if (spaceCount === 0 && collapsed.length >= 20) return true;
+  return false;
+}
+
 function pickParam(u: URL, keys: string[]): string | null {
   for (const k of keys) {
     const v = u.searchParams.get(k);
@@ -279,160 +334,272 @@ const Favicon: React.FC<{ url: string; className?: string }> = ({ url, className
   );
 };
 
-// Global cache to avoid re-fetching previews repeatedly across renders
-const previewCache = new Map<string, string>();
-
-// Lightweight website preview image using public providers (no API key)
-const PreviewImage: React.FC<{ url: string; className?: string; withOverlay?: boolean; onMeta?: (m: { title?: string; description?: string }) => void; allowScreenshots?: boolean }> = ({ url, className, withOverlay = false, onMeta, allowScreenshots = false }) => {
-  const [idx, setIdx] = useState(0);
-  const [src, setSrc] = useState<string | null>(null);
-  const [title, setTitle] = useState<string | null>(null);
-
-  const providers = useMemo(() => {
-    try {
-      const cleaned = unwrapRedirect(url);
-      const u = new URL(/^https?:\/\//i.test(cleaned) ? cleaned : `https://${cleaned}`);
-      const full = u.toString();
-      return [
-        // thum.io screenshot first (usually faster and no overlay)
-        `https://image.thum.io/get/width/800/crop/500/noanimate/${encodeURIComponent(full)}`,
-        // WordPress mShots as secondary (may show "Generating Preview")
-        `https://s.wordpress.com/mshots/v1/${encodeURIComponent(full)}?w=800`,
-      ];
-    } catch {
-      return [] as string[];
+// Simple preview fetcher using AllOrigins (matching reference implementation)
+const fetchLinkPreview = async (targetUrl: string) => {
+  const proxyUrl = `https://api.allorigins.win/get?url=${encodeURIComponent(targetUrl)}`;
+  try {
+    const response = await fetch(proxyUrl);
+    const data = await response.json();
+    const html = data?.contents;
+    if (!html) {
+      return null;
     }
-  }, [url]);
-
-  // Try Microlink OG image first (usually instant). If it fails or is slow, fall back to screenshots.
-  React.useEffect(() => {
-    let cancelled = false;
-    setSrc(null);
-    setIdx(0);
-
-    // Use cache if available
-    const cached = previewCache.get(url);
-    const metaCached = getMetaFromCache(url);
-    if (metaCached?.image) setSrc(metaCached.image);
-    if (metaCached?.title) setTitle(metaCached.title);
-    if (cached && !metaCached?.image) { setSrc(cached); }
-    // Also try DB cache
-    if (!metaCached) {
-      (async () => {
-        try {
-          const snap = await get(ref(db, `previews/${keyFromUrl(url)}`));
-          const data = snap.exists() ? snap.val() as any : null;
-          if (data && !cancelled) {
-            if (data.title) setTitle(String(data.title));
-            if (data.image && !src) setSrc(String(data.image));
-            setMetaInCache(url, { title: data.title, description: data.description, image: data.image });
-          }
-        } catch {}
-      })();
-    }
-
-    const ogFetch = async () => {
-      try {
-        const r = await fetch(`https://api.microlink.io/?url=${encodeURIComponent(url)}&audio=false&video=false&screenshot=false`);
-        const j = await r.json();
-        const img = j?.data?.image?.url || j?.data?.logo?.url || null;
-        const t = j?.data?.title ? String(j.data.title) : null;
-        const d = j?.data?.description ? String(j.data.description) : null;
-        if (!cancelled) {
-          if (t) setTitle(t);
-          if (onMeta) onMeta({ title: t || undefined, description: d || undefined });
-          if (img) setSrc(img);
-          // persist to caches
-          setMetaInCache(url, { title: t || undefined, description: d || undefined, image: img || undefined });
-          try { set(ref(db, `previews/${keyFromUrl(url)}`), { title: t || null, description: d || null, image: img || null, ts: Date.now() }); } catch {}
-        }
-      } catch { /* ignore */ }
+    const parser = new DOMParser();
+    const doc = parser.parseFromString(html, 'text/html');
+    const getAttr = (sel: string, attr = 'content') => doc.querySelector(sel)?.getAttribute(attr) || '';
+    const pickFirst = (sels: string[]): string => {
+      for (const s of sels) {
+        const v = getAttr(s);
+        if (v) return v;
+      }
+      return '';
     };
-
-    // Optionally allow screenshot fallback
-    const fallbackTimer = allowScreenshots ? setTimeout(() => {
-      if (!cancelled && !src && providers[0]) setSrc(providers[0]);
-    }, 800) : undefined as unknown as number;
-
-    ogFetch();
-    return () => { cancelled = true; if (fallbackTimer) clearTimeout(fallbackTimer); };
-  }, [url, providers]);
-
-  // When current src errors, try next provider (if we were on providers[0], move to providers[1])
-  const handleError = () => {
-    // If we were using an OG src, jump to first provider; otherwise iterate providers
-    if (src && !providers.includes(src)) {
-      setSrc(providers[0] || null);
-      setIdx(0);
-      return;
+    // Try JSON-LD as an additional robust source (headline/name)
+    const getJsonLd = (): { headline?: string; name?: string; description?: string; image?: string } => {
+      try {
+        const scripts = Array.from(doc.querySelectorAll('script[type="application/ld+json"]'));
+        const result: { headline?: string; name?: string; description?: string; image?: string } = {};
+        const scan = (obj: any) => {
+          if (!obj || typeof obj !== 'object') return;
+          if (typeof obj.headline === 'string' && !result.headline) result.headline = obj.headline;
+          if (typeof obj.name === 'string' && !result.name) result.name = obj.name;
+          if (typeof obj.description === 'string' && !result.description) result.description = obj.description;
+          if (typeof obj.image === 'string' && !result.image) result.image = obj.image;
+          if (Array.isArray(obj)) obj.forEach(scan);
+          else Object.values(obj).forEach(scan);
+        };
+        for (const s of scripts) {
+          try {
+            const json = JSON.parse(s.textContent || '{}');
+            scan(json);
+          } catch {}
+        }
+        return result;
+      } catch { return {}; }
+    };
+    const ld = getJsonLd();
+    const title = ((doc.title || '').trim()) || (pickFirst([
+      'meta[property="og:title"]',
+      'meta[name="twitter:title"]',
+      'meta[name="title"]',
+      'meta[property="title"]'
+    ]) || ld.headline || ld.name || '').trim();
+    const description = (pickFirst([
+      'meta[property="og:description"]',
+      'meta[name="twitter:description"]',
+      'meta[name="description"]',
+      'meta[property="description"]'
+    ]) || ld.description || '').trim();
+    let image = pickFirst([
+      'meta[property="og:image:secure_url"]',
+      'meta[property="og:image"]',
+      'meta[name="twitter:image:src"]',
+      'meta[name="twitter:image"]',
+      'meta[name="image"]',
+      'link[rel="image_src"]'
+    ]) || ld.image || '';
+    // Last-resort: use first H1 if no title
+    let h1 = '';
+    try { h1 = (doc.querySelector('h1')?.textContent || '').trim(); } catch {}
+    const finalTitle = (title || h1 || '').trim();
+    if (image && !/^https?:\/\//i.test(image)) {
+      try { image = new URL(image, targetUrl).href; } catch {}
     }
-    const next = idx + 1;
-    if (providers[next]) {
-      setIdx(next);
-      setSrc(providers[next]);
-    } else {
-      setSrc(null);
-    }
-  };
-
-  const finalSrc = src ?? providers[idx];
-  React.useEffect(() => { if (finalSrc) previewCache.set(url, finalSrc); }, [finalSrc, url]);
-  if (!finalSrc) return null;
-  return (
-    <>
-      <img
-        src={finalSrc}
-        alt=""
-        className={className}
-        loading="lazy"
-        referrerPolicy="no-referrer"
-        onError={handleError}
-      />
-      {withOverlay && title && (
-        <div className="absolute inset-x-0 bottom-0 p-2 bg-gradient-to-t from-black/70 via-black/30 to-transparent text-white text-[12px] leading-tight line-clamp-2 pointer-events-none">
-          {title}
-        </div>
-      )}
-    </>
-  );
+    const result = {
+      title: finalTitle.substring(0, 100),
+      description: description.substring(0, 200),
+      image
+    };
+    return result;
+  } catch (error) {
+    console.error('[Sources] fetchLinkPreview:error', { targetUrl, error });
+    return null;
+  }
 };
 
 const SourcesDisplay: React.FC<SourcesDisplayProps> = ({ sources, className }) => {
-  const [showAll, setShowAll] = useState(false);
-  const [metaMap, setMetaMap] = useState<Record<string, { title?: string; description?: string }>>({});
+  const [open, setOpen] = useState(false);
+  const [currentIdx, setCurrentIdx] = useState(0);
+  const [metaMap, setMetaMap] = useState<Record<string, { title?: string; description?: string; image?: string }>>({});
   
   if (!sources || sources.length === 0) return null;
 
-  const displayCount = showAll ? sources.length : 2;
-  const gridCols = showAll ? 'grid-cols-3' : 'grid-cols-2';
+  // Carousel paging: show 3 at a time
+  const start = Math.min(currentIdx, Math.max(0, Math.max(0, sources.length - 3)));
+  const visible = sources.slice(start, Math.min(start + 3, sources.length));
+  const canPrev = start > 0;
+  const canNext = start + 3 < sources.length;
+
+  // Batch-fetch metadata for visible cards to ensure title/description render quickly
+  React.useEffect(() => {
+    let cancelled = false;
+    const run = async () => {
+      try {
+        await Promise.allSettled(
+          visible.map(async (src) => {
+            const { resolvedUrl, siteUrl, sourceKey } = computeKeys(src);
+            if (cancelled) return;
+            // Cache first, but only if it has text to avoid image-only partial UI
+            const cached = getMetaFromCache(resolvedUrl) || getMetaFromCache(siteUrl) || getMetaFromCache(src.url);
+            if (cached && (cached.title || cached.description)) {
+              normalizeSetMeta(setMetaMap, src, { resolvedUrl, siteUrl }, { title: cached.title, description: cached.description, image: cached.image });
+            }
+            if (metaMap[sourceKey]?.title && metaMap[sourceKey]?.description && metaMap[sourceKey]?.image) return;
+            const cleaned = (() => { try { return unwrapRedirect(resolvedUrl); } catch { return resolvedUrl; } })();
+            const meta = await fetchLinkPreview(cleaned);
+            if (cancelled || !meta) return;
+            normalizeSetMeta(setMetaMap, src, { resolvedUrl, siteUrl }, { title: meta.title, description: meta.description, image: meta.image });
+            // Persist cache under all related keys
+            setMetaInCache(resolvedUrl, meta);
+            setMetaInCache(siteUrl, meta);
+            setMetaInCache(src.url, meta);
+          })
+        );
+      } catch (e) {
+        console.error('[Sources] batch_meta:error', e);
+      }
+    };
+    run();
+    return () => { cancelled = true; };
+  }, [start, visible.map(v => v.url).join('|')]);
+
+  // When the sheet opens, fetch metadata for ALL sources so titles won't be 'Untitled'
+  React.useEffect(() => {
+    if (!open) return;
+    let cancelled = false;
+    const run = async () => {
+      try {
+        await Promise.allSettled(
+          sources.map(async (src) => {
+            const { resolvedUrl, siteUrl, sourceKey } = computeKeys(src);
+            if (cancelled) return;
+            if (metaMap[sourceKey]?.title || metaMap[sourceKey]?.description) return;
+            const cached = getMetaFromCache(resolvedUrl) || getMetaFromCache(siteUrl) || getMetaFromCache(src.url);
+            if (cached && (cached.title || cached.description)) {
+              normalizeSetMeta(setMetaMap, src, { resolvedUrl, siteUrl }, { title: cached.title, description: cached.description, image: cached.image });
+              return;
+            }
+            const cleaned = (() => { try { return unwrapRedirect(resolvedUrl); } catch { return resolvedUrl; } })();
+            const meta = await fetchLinkPreview(cleaned);
+            if (!cancelled && meta) {
+              normalizeSetMeta(setMetaMap, src, { resolvedUrl, siteUrl }, { title: meta.title, description: meta.description, image: meta.image });
+              setMetaInCache(resolvedUrl, meta);
+              setMetaInCache(siteUrl, meta);
+              setMetaInCache(src.url, meta);
+            }
+          })
+        );
+      } catch (e) {
+        console.error('[Sources] sheet_meta:error', e);
+      }
+    };
+    run();
+    return () => { cancelled = true; };
+  }, [open, sources.map(s => s.url).join('|')]);
+
+  // Prefetch metadata for ALL sources when list changes, so cards can render atomically
+  React.useEffect(() => {
+    let cancelled = false;
+    const run = async () => {
+      try {
+        await Promise.allSettled(
+          sources.map(async (src) => {
+            const { resolvedUrl, siteUrl, sourceKey } = computeKeys(src);
+            if (cancelled) return;
+            if (metaMap[sourceKey]?.title || metaMap[sourceKey]?.description) return;
+            const cached = getMetaFromCache(resolvedUrl) || getMetaFromCache(siteUrl) || getMetaFromCache(src.url);
+            if (cached && (cached.title || cached.description)) {
+              normalizeSetMeta(setMetaMap, src, { resolvedUrl, siteUrl }, { title: cached.title, description: cached.description, image: cached.image });
+              return;
+            }
+            const cleaned = (() => { try { return unwrapRedirect(resolvedUrl); } catch { return resolvedUrl; } })();
+            const meta = await fetchLinkPreview(cleaned);
+            if (!cancelled && meta) {
+              normalizeSetMeta(setMetaMap, src, { resolvedUrl, siteUrl }, { title: meta.title, description: meta.description, image: meta.image });
+              setMetaInCache(resolvedUrl, meta);
+              setMetaInCache(siteUrl, meta);
+              setMetaInCache(src.url, meta);
+            }
+          })
+        );
+      } catch (e) {
+        console.error('[Sources] prefetch_meta:error', e);
+      }
+    };
+    if (sources && sources.length) run();
+    return () => { cancelled = true; };
+  }, [sources.map(s => s.url).join('|')]);
 
   return (
     <div className={className || ''}>
       <div className="flex items-center justify-between mb-3">
-        <span className="text-sm text-muted-foreground">Sources • {sources.length}</span>
-        {sources.length > 2 && (
+        <div className="flex items-center gap-2">
+          <span className="text-sm text-muted-foreground">Sources • {sources.length}</span>
+        </div>
+        <div className="flex items-center gap-2">
+          {sources.length > 3 && (
+            <>
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-8 w-8 text-muted-foreground hover:text-foreground"
+                disabled={!canPrev}
+                onClick={() => setCurrentIdx((i) => Math.max(0, i - 3))}
+                aria-label="Previous sources"
+              >
+                <ChevronLeft className="h-4 w-4" />
+              </Button>
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-8 w-8 text-muted-foreground hover:text-foreground"
+                disabled={!canNext}
+                onClick={() => setCurrentIdx((i) => Math.min(sources.length - 1, i + 3))}
+                aria-label="Next sources"
+              >
+                <ChevronRight className="h-4 w-4" />
+              </Button>
+            </>
+          )}
           <Button 
             variant="ghost" 
             size="sm" 
             className="text-xs text-muted-foreground hover:text-foreground p-0 h-auto"
-            onClick={() => setShowAll(!showAll)}
+            onClick={() => setOpen(true)}
           >
-            {showAll ? 'Show Less' : 'View All'}
-            <ChevronRight className={`ml-1 h-3 w-3 transition-transform ${showAll ? 'rotate-90' : ''}`} />
+            View All
+            <ChevronRight className="ml-1 h-3 w-3" />
           </Button>
-        )}
+        </div>
       </div>
 
-      {/* Sources Grid - Rich preview cards */}
-      <div className={`grid ${gridCols} gap-2 sm:gap-3 transition-all duration-300`}>
-        {sources.slice(0, displayCount).map((source, index) => {
-          const resolvedUrl = resolveDestinationFromSource(source);
+      {/* Sources Carousel - show 3 preview cards */}
+      <div className={`grid grid-cols-1 sm:grid-cols-3 gap-2 sm:gap-3 transition-all duration-300`}>
+        {visible.map((source, index) => {
+          const { resolvedUrl, siteUrl, sourceKey } = computeKeys(source);
           const domainLabel = domainFrom(source, resolvedUrl) || 'Source';
-          const siteUrl = preferredSiteUrl(source, resolvedUrl);
-          const sourceKey = resolvedUrl || siteUrl || source.url;
+          const metaNorm = normalizeGetMeta(metaMap, source, { resolvedUrl, siteUrl, sourceKey });
           
           // Extract proper website name from domain
           const getWebsiteName = (domain: string) => {
+            // Check if domain looks like random characters (redirect token)
+            if (/^[A-Z0-9_-]{10,}$/i.test(domain) || domain === 'Source') {
+              // Try to extract from title first
+              if (source.title && !source.title.includes('://')) {
+                const titleDomain = source.title.match(/([a-z0-9-]+(?:\.[a-z0-9-]+)+)/i);
+                if (titleDomain) {
+                  domain = titleDomain[1];
+                } else if (source.title.length < 50) {
+                  // Use title if it's short enough to be a site name
+                  return source.title;
+                }
+              }
+              // Still random? Show loading state
+              if (/^[A-Z0-9_-]{10,}$/i.test(domain)) {
+                return 'Loading...';
+              }
+            }
+            
             const cleanDomain = domain.replace(/^www\./i, '').toLowerCase();
             const nameMap: Record<string, string> = {
               'youtube.com': 'YouTube',
@@ -463,55 +630,144 @@ const SourcesDisplay: React.FC<SourcesDisplayProps> = ({ sources, className }) =
               className="block group"
             >
               <div className={`rounded-2xl overflow-hidden bg-card hover:shadow-md transition-all duration-200 transform hover:scale-[1.02]`}>
-                {/* Preview area with real screenshot when available */}
-                <div className="h-24 sm:h-32 relative overflow-hidden">
-                  {/* Subtle gradient base */}
-                  <div className="absolute inset-0 bg-gradient-to-br from-muted/20 to-muted/40" />
-                  {/* Initials as placeholder behind image */}
+                {/* Preview area with gradient placeholder and OG image from metaMap */}
+                <div className="h-24 sm:h-32 relative overflow-hidden bg-gradient-to-br from-blue-500/10 to-purple-600/10">
                   <div className="absolute inset-0 flex items-center justify-center">
                     <span className="text-4xl font-bold text-muted-foreground/20">
                       {displayName.slice(0, 2).toUpperCase()}
                     </span>
                   </div>
-                  {/* Preview image on top (if loads) - use exact article URL */}
-                  <PreviewImage
-                    url={resolvedUrl}
-                    className="absolute inset-0 w-full h-full object-cover"
-                    withOverlay={false}
-                    allowScreenshots={false}
-                    onMeta={(m) => setMetaMap((prev) => (prev[sourceKey]?.title === m.title && prev[sourceKey]?.description === m.description ? prev : { ...prev, [sourceKey]: m }))}
-                  />
-                  {/* Small info icon in corner */}
-                  <div className="absolute bottom-2 right-2 w-6 h-6 rounded-full bg-black/80 dark:bg-white/80 flex items-center justify-center">
-                    <span className="text-white dark:text-black text-xs font-bold">i</span>
-                  </div>
+                  {metaNorm?.image && (metaNorm?.title || metaNorm?.description) && (
+                    <img
+                      src={metaNorm!.image as string}
+                      alt=""
+                      className="absolute inset-0 w-full h-full object-cover"
+                      loading="lazy"
+                      referrerPolicy="no-referrer"
+                      onError={(e) => { console.warn('[Sources] card_image_error', { sourceKey, url: resolvedUrl, image: metaNorm?.image, error: e }); }}
+                    />
+                  )}
                 </div>
-                {/* Content area */}
-                <div className="p-3 bg-background">
-                  <div className="flex items-start gap-3">
-                    <div className="w-8 h-8 rounded-full bg-muted flex items-center justify-center flex-shrink-0">
-                      <Favicon url={siteUrl} className="h-5 w-5" />
+                {/* Content area: only show when meta arrives so image+text appear together */}
+                {(() => {
+                  const meta = metaNorm;
+                  const isLoaded = !!(meta?.title || meta?.description);
+                  if (!isLoaded) {
+                    return (
+                      <div className="p-3 bg-background">
+                        <div className="space-y-2">
+                          <div className="h-3 bg-muted rounded w-24"></div>
+                          <div className="h-3 bg-muted rounded w-40"></div>
+                        </div>
+                      </div>
+                    );
+                  }
+                  return (
+                    <div className="p-3 bg-background">
+                      <div className="flex items-start gap-3">
+                        <div className="w-8 h-8 rounded-full bg-muted flex items-center justify-center flex-shrink-0">
+                          <Favicon url={siteUrl} className="h-5 w-5" />
+                        </div>
+                        <div className="min-w-0">
+                          <h4 className="font-medium text-sm text-foreground">{displayName}</h4>
+                          <p className="text-xs text-muted-foreground truncate">
+                            {(meta.title && !looksLikeToken(meta.title))
+                              ? meta.title.substring(0, 100)
+                              : meta.description?.substring(0, 100)}
+                          </p>
+                        </div>
+                      </div>
                     </div>
-                    <div className="min-w-0">
-                      <h4 className="font-medium text-sm text-foreground">{displayName}</h4>
-                      {(() => {
-                        const metaTitle = metaMap[sourceKey]?.title || source.snippet;
-                        if (metaTitle) return <p className="text-xs text-muted-foreground truncate">{metaTitle}</p>;
-                        try {
-                          const u = new URL(resolvedUrl);
-                          const path = decodeURIComponent(u.pathname.replace(/^\//, ''));
-                          const nice = path ? path.split('/').pop()!.replace(/[-_]/g,' ').slice(0, 120) : '';
-                          return nice ? <p className="text-xs text-muted-foreground truncate">{nice}</p> : null;
-                        } catch { return null; }
-                      })()}
-                    </div>
-                  </div>
-                </div>
+                  );
+                })()}
               </div>
             </a>
           );
         })}
       </div>
+
+      {/* Right-side sheet for full list (no images, just favicon + text) */}
+      <Sheet open={open} onOpenChange={setOpen}>
+        <SheetContent side="right" className="sm:max-w-md">
+          <SheetHeader>
+            <SheetTitle>Sources</SheetTitle>
+          </SheetHeader>
+          <div className="mt-4 max-h-[80vh] overflow-y-auto pr-2 divide-y divide-border">
+            {sources.map((source) => {
+              const { resolvedUrl, siteUrl, sourceKey } = computeKeys(source);
+              const domainLabel = domainFrom(source, resolvedUrl) || 'Source';
+              const metaNorm = normalizeGetMeta(metaMap, source, { resolvedUrl, siteUrl, sourceKey })
+                || getMetaFromCache(resolvedUrl)
+                || getMetaFromCache(siteUrl)
+                || getMetaFromCache(source.url);
+              const displayName = (() => {
+                const d = domainLabel.replace(/^www\./i, '').toLowerCase();
+                const map: Record<string, string> = {
+                  'youtube.com': 'YouTube',
+                  'google.com': 'Google',
+                  'facebook.com': 'Facebook',
+                  'twitter.com': 'Twitter',
+                  'linkedin.com': 'LinkedIn',
+                  'github.com': 'GitHub',
+                  'stackoverflow.com': 'Stack Overflow',
+                  'medium.com': 'Medium',
+                  'reddit.com': 'Reddit',
+                  'wikipedia.org': 'Wikipedia',
+                  'amazon.com': 'Amazon',
+                };
+                return map[d] || d.split('.')[0].charAt(0).toUpperCase() + d.split('.')[0].slice(1);
+              })();
+              // Build title with robust fallbacks similar to the card
+              const titleText = (() => {
+                const t1 = metaNorm?.title;
+                const d1 = metaNorm?.description;
+                const t2 = source.title;
+                const isDomainLike = (s?: string) => !!s && /^(?:[a-z0-9-]+\.)+[a-z]{2,}$/i.test(String(s).trim());
+                if (t1 && !looksLikeToken(t1)) return t1.substring(0, 120);
+                if (d1 && !looksLikeToken(d1)) return d1.substring(0, 120);
+                if (t2 && !looksLikeToken(t2) && !isDomainLike(t2)) return t2.substring(0, 120);
+                try {
+                  const u = new URL(resolvedUrl);
+                  const last = decodeURIComponent(u.pathname.replace(/^\//,'')).split('/').pop() || '';
+                  const nice = last.replace(/[-_]/g,' ').trim();
+                  if (nice && !looksLikeToken(nice)) return nice.substring(0, 120);
+                } catch {}
+                return 'Loading…';
+              })();
+              const snippetText = (() => {
+                const d = metaNorm?.description;
+                const s = source.snippet;
+                if (d && !looksLikeToken(d)) return d;
+                if (s && !looksLikeToken(s)) return s;
+                return '';
+              })();
+              return (
+                <a
+                  key={sourceKey}
+                  href={resolvedUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="block hover:bg-accent/40 transition-colors p-3"
+                >
+                  <div className="flex items-start gap-3">
+                    <div className="w-7 h-7 rounded-full bg-muted flex items-center justify-center flex-shrink-0">
+                      <Favicon url={siteUrl} className="h-4 w-4" />
+                    </div>
+                    <div className="min-w-0">
+                      <div className="text-sm font-medium text-foreground leading-tight">{displayName}</div>
+                      <div className="text-xs text-muted-foreground">{displayFromUrl(siteUrl)}</div>
+                      <div className="text-[15px] font-semibold text-foreground mt-2 leading-snug line-clamp-2">{titleText}</div>
+                      {snippetText && (
+                        <div className="text-xs text-muted-foreground mt-1 leading-snug line-clamp-2">{snippetText}</div>
+                      )}
+                    </div>
+                  </div>
+                </a>
+              );
+            })}
+          </div>
+        </SheetContent>
+      </Sheet>
     </div>
   );
 };

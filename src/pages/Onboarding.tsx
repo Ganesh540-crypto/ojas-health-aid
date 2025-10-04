@@ -6,26 +6,19 @@ import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
 import { Separator } from '@/components/ui/separator';
 import { profileStore, type UserProfile } from '@/lib/profileStore';
-import { auth, db } from '@/lib/firebase';
+import { auth, db, storage } from '@/lib/firebase';
 import { ref, set, get, child } from 'firebase/database';
+import { ref as storageRef, uploadBytes, getDownloadURL } from 'firebase/storage';
+import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 
-const avatars = [
-  '/avatars/cat-1.svg',
-  '/avatars/dog-1.svg',
-  '/avatars/robot-1.svg',
-  '/avatars/alien-1.svg',
-  '/avatars/koala-1.svg',
-  '/avatars/user-1.svg',
-];
-
-type ProfileWithAvatar = UserProfile & { avatar?: string };
+// Onboarding now uses Gmail photo by default or lets the user upload a photo to Storage (photoUrl)
 
 export default function Onboarding() {
   const nav = useNavigate();
   const [step, setStep] = useState(1);
   const [saving, setSaving] = useState(false);
   const [profile, setProfile] = useState<UserProfile>({});
-  const [selectedAvatar, setSelectedAvatar] = useState<string>('');
+  const [uploading, setUploading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -46,7 +39,12 @@ export default function Onboarding() {
       }
       // Fallback: prefill from local / auth display
       const local = profileStore.get();
-      setProfile({ ...local, name: u.displayName || local.name, email: u.email || local.email });
+      setProfile({
+        ...local,
+        name: u.displayName || local.name,
+        email: u.email || local.email,
+        photoUrl: local.photoUrl || u.photoURL || undefined,
+      });
     });
     return () => sub();
   }, [nav]);
@@ -59,7 +57,7 @@ export default function Onboarding() {
     if (!user) return;
     setSaving(true);
     setError(null);
-    const data: ProfileWithAvatar = { ...profile, avatar: selectedAvatar };
+    const data: UserProfile = { ...profile };
     try {
       // Save local
       profileStore.set(data);
@@ -130,15 +128,38 @@ export default function Onboarding() {
           )}
 
           {step === 3 && (
-            <div>
-              <Label>Choose your avatar</Label>
-              <div className="mt-3 grid grid-cols-5 gap-3">
-                {avatars.map((src) => (
-                  <button key={src} type="button" className={`border rounded-md p-1 hover:border-primary ${selectedAvatar === src ? 'ring-2 ring-primary' : 'border-border'}`} onClick={() => setSelectedAvatar(src)}>
-                    <img src={src} alt="avatar" className="h-16 w-16 object-contain" />
-                  </button>
-                ))}
+            <div className="space-y-4">
+              <Label>Profile photo</Label>
+              <div className="flex items-center gap-4">
+                <Avatar className="h-16 w-16">
+                  <AvatarImage src={profile.photoUrl || auth.currentUser?.photoURL || undefined} alt="profile" />
+                  <AvatarFallback>{(profile.name?.[0] || auth.currentUser?.displayName?.[0] || (profile.email || auth.currentUser?.email || 'U')[0] || 'U').toUpperCase()}</AvatarFallback>
+                </Avatar>
+                <div className="space-x-2">
+                  <input id="onb-photo" type="file" accept="image/*" className="hidden" onChange={async (e) => {
+                    const f = e.target.files?.[0];
+                    if (!f) return;
+                    if (!f.type.startsWith('image/')) { return; }
+                    if (f.size > 5 * 1024 * 1024) { return; }
+                    const user = auth.currentUser; if (!user) return;
+                    setUploading(true);
+                    try {
+                      const path = `users/${user.uid}/profile/avatar_${Date.now()}`;
+                      const sRef = storageRef(storage, path);
+                      await uploadBytes(sRef, f);
+                      const url = await getDownloadURL(sRef);
+                      setProfile(prev => ({ ...prev, photoUrl: url }));
+                    } finally {
+                      setUploading(false);
+                    }
+                  }} />
+                  <Button variant="outline" type="button" onClick={() => document.getElementById('onb-photo')?.click()} disabled={uploading}>{uploading ? 'Uploading…' : 'Upload photo'}</Button>
+                  {auth.currentUser?.photoURL && (
+                    <Button type="button" variant="secondary" onClick={() => setProfile(prev => ({ ...prev, photoUrl: auth.currentUser?.photoURL || prev.photoUrl }))}>Use Gmail photo</Button>
+                  )}
+                </div>
               </div>
+              <p className="text-xs text-muted-foreground">You can change this anytime in Settings.</p>
             </div>
           )}
 

@@ -7,6 +7,8 @@ export interface ChatMessageItem {
   timestamp: number;
   healthRelated?: boolean;
   sources?: Array<{ title: string; url: string; snippet?: string; displayUrl?: string }>;
+  attachments?: Array<{ url: string; name: string; type: string; size: number }>;
+  metaItems?: Array<{ type: 'step' | 'thought' | 'search_query'; text?: string; query?: string; ts?: number }>;
 }
 
 export interface Chat {
@@ -93,6 +95,25 @@ function loadAll(): Chat[] {
           if (Array.isArray(m.sources)) {
             base.sources = m.sources as Array<{ title: string; url: string; snippet?: string; displayUrl?: string }>;
           }
+          if (Array.isArray((m as any).attachments)) {
+            base.attachments = (m as any).attachments as Array<{ url: string; name: string; type: string; size: number }>;
+          }
+          // Preserve metaItems if present (thoughts, steps, search queries)
+          const rawMeta = (m as any).metaItems;
+          if (Array.isArray(rawMeta)) {
+            const cleanedMeta = rawMeta
+              .map((it: any) => {
+                const type = it?.type;
+                if (type !== 'step' && type !== 'thought' && type !== 'search_query') return undefined;
+                const out: { type: 'step' | 'thought' | 'search_query'; text?: string; query?: string; ts?: number } = { type };
+                if (typeof it?.text === 'string') out.text = it.text;
+                if (typeof it?.query === 'string') out.query = it.query;
+                if (typeof it?.ts === 'number') out.ts = it.ts;
+                return out;
+              })
+              .filter(Boolean) as Array<{ type: 'step' | 'thought' | 'search_query'; text?: string; query?: string; ts?: number }>;
+            if (cleanedMeta.length > 0) base.metaItems = cleanedMeta;
+          }
           return base;
         });
       cleaned.push({
@@ -114,8 +135,9 @@ function saveAll(chats: Chat[]) {
   localStorage.setItem(LS_KEY, JSON.stringify(chats));
 }
 
-import { auth, db } from './firebase';
+import { auth, db, storage } from './firebase';
 import { ref, set, get, child } from 'firebase/database';
+import { ref as storageRef, uploadBytes, getDownloadURL } from 'firebase/storage';
 
 // Recursively remove undefined values from objects/arrays to satisfy Firebase RTDB constraints
 function isPlainObject(v: unknown): v is Record<string, unknown> {
@@ -124,7 +146,7 @@ function isPlainObject(v: unknown): v is Record<string, unknown> {
 function stripUndefinedDeep<T>(value: T): T {
   const recurse = (val: unknown): unknown => {
     if (Array.isArray(val)) {
-      console.log('stripUndefinedDeep: Processing array:', val);
+      // Processing array
       // For Firebase compatibility, ensure arrays have proper numeric indices
       const cleaned = val.map((item) => recurse(item)).filter(item => item !== undefined);
       return cleaned; // Preserve empty arrays instead of converting to null
@@ -134,13 +156,8 @@ function stripUndefinedDeep<T>(value: T): T {
       for (const [k, v2] of Object.entries(val)) {
         if (v2 === undefined) continue;
         if (k === 'sources' && Array.isArray(v2)) {
-          console.log('stripUndefinedDeep: Processing sources array:', v2);
-          console.log('stripUndefinedDeep: Source array length:', v2.length);
-          console.log('stripUndefinedDeep: First source:', v2[0]);
           // Force sources to be a proper Firebase-compatible array
           const cleanedSources = v2.filter(source => source != null);
-          console.log('stripUndefinedDeep: Cleaned sources length:', cleanedSources.length);
-          console.log('stripUndefinedDeep: Cleaned sources:', cleanedSources);
           out[k] = cleanedSources; // Preserve sources arrays instead of converting to null
         } else {
           out[k] = recurse(v2);
@@ -161,10 +178,10 @@ export const chatStore = {
       const snap = await get(child(ref(db), `users/${user.uid}/chats`));
       if (snap.exists()) {
         const chats = (snap.val() as Chat[]) || [];
-        console.log('ChatStore: Loaded from Firebase:', JSON.stringify(chats, null, 2));
+        // Loaded from Firebase
         saveAll(chats);
       } else {
-        console.log('ChatStore: No data found in Firebase');
+        // No data found in Firebase
       }
     } catch (err) {
       console.error('hydrateFromCloud failed:', err);
@@ -172,29 +189,21 @@ export const chatStore = {
   },
   async pushToCloud() {
     const user = auth.currentUser;
-    if (!user) return;
+    if (!user) {
+      console.log('⚠️ No authenticated user, skipping cloud push');
+      return;
+    }
     try {
       const local = loadAll();
-      console.log('ChatStore: About to save to Firebase:', JSON.stringify(local, null, 2));
-      
-      // Check if any messages have sources
-      const messagesWithSources = local.flatMap(chat => 
-        (chat.messages || []).filter(msg => msg.sources && msg.sources.length > 0)
-      );
-      console.log('ChatStore: Messages with sources before cleaning:', messagesWithSources.length, messagesWithSources);
-      
+      console.log('☁️ Pushing to Firebase:', { 
+        numChats: local.length,
+        hasMetaItems: local.some(c => c.messages.some(m => m.metaItems && m.metaItems.length > 0))
+      });
       const cleaned = stripUndefinedDeep(local);
-      console.log('ChatStore: After stripUndefinedDeep:', JSON.stringify(cleaned, null, 2));
-      
-      // Check if sources survived cleaning
-      const cleanedMessagesWithSources = cleaned.flatMap(chat => 
-        (chat.messages || []).filter(msg => msg.sources && msg.sources.length > 0)
-      );
-      console.log('ChatStore: Messages with sources after cleaning:', cleanedMessagesWithSources.length, cleanedMessagesWithSources);
       await set(ref(db, `users/${user.uid}/chats`), cleaned);
-      console.log('ChatStore: Successfully saved to Firebase');
+      console.log('✅ Successfully pushed to Firebase');
     } catch (err) {
-      console.error('pushToCloud failed:', err);
+      console.error('❌ pushToCloud failed:', err);
     }
   },
   list(): Chat[] {
@@ -226,11 +235,40 @@ export const chatStore = {
     window.dispatchEvent(new Event('ojas-chats-changed'));
     return chat;
   },
-  addMessage(id: string, role: ChatMessageRole, content: string): Chat | undefined {
+  async uploadAttachment(file: File, chatId: string, messageId: string): Promise<{ url: string; name: string; type: string; size: number }> {
+    const user = auth.currentUser;
+    if (!user) throw new Error('User not authenticated');
+    
+    const timestamp = Date.now();
+    // Sanitize filename to avoid issues
+    const sanitizedName = file.name.replace(/[^a-zA-Z0-9._-]/g, '_');
+    const fileName = `${timestamp}_${sanitizedName}`;
+    const path = `users/${user.uid}/chats/${chatId}/${messageId}/${fileName}`;
+    const fileRef = storageRef(storage, path);
+    
+    console.log('📤 Uploading attachment to Firebase Storage:', path);
+    await uploadBytes(fileRef, file);
+    const url = await getDownloadURL(fileRef);
+    console.log('✅ Upload successful, URL:', url);
+    
+    return {
+      url,
+      name: file.name,
+      type: file.type,
+      size: file.size
+    };
+  },
+  addMessage(id: string, role: ChatMessageRole, content: string, attachments?: Array<{ url: string; name: string; type: string; size: number }>): Chat | undefined {
   const chats = loadAll();
   const chat = ephemeralCache[id] || chats.find(c => c.id === id);
     if (!chat) return undefined;
-  const msg: ChatMessageItem = { id: crypto.randomUUID(), role, content, timestamp: Date.now() };
+  const msg: ChatMessageItem = { 
+      id: crypto.randomUUID(), 
+      role, 
+      content, 
+      timestamp: Date.now(),
+      ...(attachments ? { attachments } : {})
+    };
     chat.messages.push(msg);
     if (chat.ephemeral && role === 'user') {
       // Persist this previously ephemeral chat now
@@ -255,7 +293,7 @@ export const chatStore = {
     return chat;
   },
   // Add a message and return the new message id (useful for placeholders that will be updated)
-  addMessageWithId(id: string, role: ChatMessageRole, content: string, meta?: { healthRelated?: boolean; sources?: Array<{ title: string; url: string; snippet?: string; displayUrl?: string }> }): string | undefined {
+  addMessageWithId(id: string, role: ChatMessageRole, content: string, meta?: { healthRelated?: boolean; sources?: Array<{ title: string; url: string; snippet?: string; displayUrl?: string }>; metaItems?: Array<{ type: 'step' | 'thought' | 'search_query'; text?: string; query?: string; ts?: number }> }): string | undefined {
     const chats = loadAll();
     const chat = ephemeralCache[id] || chats.find(c => c.id === id);
     if (!chat) return undefined;
@@ -265,7 +303,8 @@ export const chatStore = {
       content, 
       timestamp: Date.now(), 
       ...(meta?.healthRelated !== undefined ? { healthRelated: meta.healthRelated } : {}),
-      ...(meta?.sources ? { sources: meta.sources } : {})
+      ...(meta?.sources ? { sources: meta.sources } : {}),
+      ...(meta?.metaItems ? { metaItems: meta.metaItems } : {})
     };
     chat.messages.push(msg);
     // Persist even if the first non-ephemeral message is from assistant (e.g., hidden intake submit)
@@ -299,7 +338,7 @@ export const chatStore = {
     msg.content = content;
     if (preserveSources && originalSources) {
       msg.sources = originalSources;
-      console.log('ChatStore: Preserving sources during update:', originalSources);
+      // Preserving sources during update
     }
     
     chat.updatedAt = Date.now();
@@ -308,6 +347,39 @@ export const chatStore = {
     if (msg.sources && msg.sources.length > 0) {
       this.pushToCloud();
     }
+  },
+  updateMessageSources(chatId: string, messageId: string, sources: Array<{ title: string; url: string; snippet?: string; displayUrl?: string }>) {
+    const chats = loadAll();
+    const chat = chats.find(c => c.id === chatId);
+    if (!chat) return;
+    const msg = chat.messages.find(m => m.id === messageId);
+    if (!msg) return;
+    msg.sources = sources;
+    chat.updatedAt = Date.now();
+    saveAll(chats);
+    this.pushToCloud();
+    window.dispatchEvent(new Event('ojas-chats-changed'));
+  },
+  updateMessageMeta(chatId: string, messageId: string, metaItems: Array<{ type: 'step' | 'thought' | 'search_query'; text?: string; query?: string; ts?: number }>) {
+    console.log('📝 updateMessageMeta called:', { chatId, messageId, metaItems });
+    const chats = loadAll();
+    const chat = chats.find(c => c.id === chatId);
+    if (!chat) {
+      console.warn('❌ Chat not found:', chatId);
+      return;
+    }
+    const msg = chat.messages.find(m => m.id === messageId);
+    if (!msg) {
+      console.warn('❌ Message not found:', messageId);
+      return;
+    }
+    msg.metaItems = metaItems;
+    chat.updatedAt = Date.now();
+    saveAll(chats);
+    console.log('✅ MetaItems saved locally, pushing to cloud...');
+    // Push to cloud to persist meta items
+    this.pushToCloud();
+    window.dispatchEvent(new Event('ojas-chats-changed'));
   },
   rename(id: string, title: string): Chat | undefined {
     const chats = loadAll();

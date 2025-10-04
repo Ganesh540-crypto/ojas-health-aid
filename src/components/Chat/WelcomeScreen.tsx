@@ -34,13 +34,18 @@ const WelcomeScreen = ({ onSendMessage }: WelcomeScreenProps) => {
     return () => { ignore = true; };
   }, []);
 
+  // Compute localized greeting using local hours (avoid AM/PM locale parsing)
+  const now = new Date();
+  const hours = now.getHours();
+  const greeting = hours < 12 ? 'Good morning!' : hours < 17 ? 'Good afternoon!' : 'Good evening!';
+
   // Removed suggestions grid per new UX requirement
 
   return (
     <div className="flex-1 flex flex-col items-center justify-center px-6 py-12 max-w-3xl mx-auto">
       <img src="/logo-jas.svg" alt="Ojas" className="h-14 w-14 mb-6 animate-pulse" />
       <h1 className="font-futuristic text-4xl text-foreground mb-4">
-        {new Intl.DateTimeFormat(undefined, { hour: 'numeric', hour12: true }).format(new Date()).includes('AM') ? 'Good morning!' : (new Date().getHours() < 17 ? 'Good afternoon!' : 'Good evening!')}
+        {greeting}
       </h1>
       <p className="text-2xl text-foreground mb-8">
         What's on <span className="text-primary font-medium">your mind?</span>

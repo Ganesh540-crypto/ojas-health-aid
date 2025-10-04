@@ -1,19 +1,24 @@
-import { useState, useRef, useEffect } from "react";
+import React, { useState, useRef, useEffect } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import ChatHeader from "./ChatHeader";
 // Controls moved to settings; no per-chat UI bar now.
 import ChatMessage from "./ChatMessage";
 import ChatInput from "./ChatInput";
+import HealthIntakeModal from "./HealthIntakeModal";
 import SourcesDisplay from "./SourcesDisplay";
 import WelcomeScreen from "@/components/Chat/WelcomeScreen";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { Alert, AlertDescription } from "@/components/ui/alert";
+import { Shield, AlertTriangle, ChevronDown } from 'lucide-react';
 import { Button } from "@/components/ui/button";
-import { ChevronDown } from "lucide-react";
-import type { HealthIntakePayload, HealthIntakeQuestion } from '@/lib/healthIntake';
+import { LoadingAnimation } from "@/components/ui/loading-animation";
+import type { HealthIntakePayload } from '@/lib/healthIntake';
 import { memoryStore, type MemoryMessage } from "@/lib/memory";
 import { auth } from "@/lib/firebase";
 import { profileStore } from "@/lib/profileStore";
 import { chatStore } from "@/lib/chatStore";
+import { languageStore } from "@/lib/languageStore";
+import { azureTranslator } from "@/lib/azureTranslator";
 
 interface Message {
   id: string;
@@ -22,6 +27,7 @@ interface Message {
   timestamp: Date;
   healthRelated?: boolean;
   sources?: Array<{ title: string; url: string; snippet?: string; displayUrl?: string }>;
+  attachments?: File[];
 }
 
 const ChatContainer = () => {
@@ -35,40 +41,183 @@ const ChatContainer = () => {
   const [scrollLocked, setScrollLocked] = useState(true);
   const [showScrollButton, setShowScrollButton] = useState(false);
   const [shouldAutoScroll, setShouldAutoScroll] = useState(true);
+  const [stickyQuery, setStickyQuery] = useState<{ content: string; isVisible: boolean } | null>(null);
+  const [isUserScrolling, setIsUserScrolling] = useState(false);
+  const scrollTimeoutRef = useRef<NodeJS.Timeout>();
   const [editingMessage, setEditingMessage] = useState<string>("");
   const [profile, setProfile] = useState(() => profileStore.get());
   const [intake, setIntake] = useState<HealthIntakePayload | null>(null);
   const [intakeAnswers, setIntakeAnswers] = useState<Record<string,string>>({});
   const [awaitingIntake, setAwaitingIntake] = useState(false);
   const scrollAreaRef = useRef<HTMLDivElement>(null);
-  const [intakeIndex, setIntakeIndex] = useState(0);
-  const [thinkingMode, setThinkingMode] = useState<'thinking' | 'searching'>('thinking');
+  const [thinkingMode, setThinkingMode] = useState<'routing' | 'thinking' | 'searching' | 'analyzing'>('thinking');
   const [thinkingLabel, setThinkingLabel] = useState<string>('Thinking');
+  const [lastImageAttachments, setLastImageAttachments] = useState<File[] | null>(null);
+  const [lang, setLang] = useState(() => languageStore.get());
+  const [translatedMap, setTranslatedMap] = useState<Record<string, string>>({});
+  const [streamingBotId, setStreamingBotId] = useState<string | null>(null);
+  type MetaItem = { type: 'step' | 'thought' | 'search_query'; text?: string; query?: string; ts?: number };
+  const [metaByMessage, setMetaByMessage] = useState<Record<string, MetaItem[]>>({});
+  const [metaOpen, setMetaOpen] = useState<Record<string, boolean>>({});
+  const [i18n, setI18n] = useState({
+    loadingChat: 'Loading chat…',
+    reload: 'Reload',
+    healthDetails: 'Health Details',
+    answerIntro: 'Answer the questions below to personalize safe guidance. You can select an option or type an answer. Use the final card to add extra conditions.',
+    anyAdditional: 'Any additional conditions or details?',
+    typeExtraPlaceholder: 'Enter any other symptoms, allergies, medications, or context...',
+    back: 'Back',
+    next: 'Next',
+    submitAll: 'Submit All',
+    typeInstead: "I'll type instead above",
+    thinking: 'Thinking',
+    searching: 'Searching',
+    analyzing: 'Analyzing',
+  });
 
-  const scrollToBottom = (smooth = true) => {
+  const scrollToBottom = (smooth = true, force = false) => {
     if (scrollAreaRef.current) {
       const scrollContainer = scrollAreaRef.current.querySelector('[data-radix-scroll-area-viewport]');
       if (scrollContainer) {
-        // Use requestAnimationFrame to avoid bouncing during streaming
+        // Don't auto-scroll if user is scrolling and not forced
+        if (isUserScrolling && !force) return;
+        
         requestAnimationFrame(() => {
           if (smooth) {
             scrollContainer.scrollTo({ top: scrollContainer.scrollHeight, behavior: 'smooth' });
           } else {
             scrollContainer.scrollTop = scrollContainer.scrollHeight;
           }
+          setIsUserScrolling(false);
         });
       }
     }
   };
 
+  // Smart scroll behavior
   useEffect(() => {
-    if (shouldAutoScroll && messages.length > 0) {
-      const timer = setTimeout(() => {
-        scrollToBottom();
-      }, 100);
-      return () => clearTimeout(timer);
+    const scrollContainer = scrollAreaRef.current?.querySelector('[data-radix-scroll-area-viewport]');
+    if (!scrollContainer) return;
+    
+    const handleScroll = () => {
+      const { scrollTop, scrollHeight, clientHeight } = scrollContainer as HTMLElement;
+      const distanceFromBottom = scrollHeight - scrollTop - clientHeight;
+      const isNearBottom = distanceFromBottom < 100;
+      
+      // Clear timeout on any scroll
+      if (scrollTimeoutRef.current) clearTimeout(scrollTimeoutRef.current);
+      
+      if (!isNearBottom) {
+        setIsUserScrolling(true);
+        setShowScrollButton(true);
+      } else {
+        setShowScrollButton(false);
+        scrollTimeoutRef.current = setTimeout(() => {
+          setIsUserScrolling(false);
+        }, 300);
+      }
+      
+      // Show sticky query only when far from bottom (like Perplexity)
+      const userMessages = messages.filter(m => !m.isBot);
+      const lastUserMessage = userMessages[userMessages.length - 1];
+      const showSticky = distanceFromBottom > 400;
+      if (showSticky && lastUserMessage) {
+        setStickyQuery({ 
+          content: lastUserMessage.content.substring(0, 80),
+          isVisible: true 
+        });
+      } else {
+        setStickyQuery(null);
+      }
+    };
+    
+    scrollContainer.addEventListener('scroll', handleScroll);
+    return () => scrollContainer.removeEventListener('scroll', handleScroll);
+  }, [messages]);
+  
+  // Auto-scroll only for new messages when at bottom
+  useEffect(() => {
+    if (messages.length > 0 && !isUserScrolling) {
+      const lastMessage = messages[messages.length - 1];
+      // Scroll for new user queries or bot messages
+      if (!lastMessage.isBot || streamingBotId) {
+        const timer = setTimeout(() => {
+          scrollToBottom(true);
+        }, 100);
+        return () => clearTimeout(timer);
+      }
     }
-  }, [messages, shouldAutoScroll]);
+  }, [messages, isUserScrolling, streamingBotId]);
+
+  // Language subscription
+  useEffect(() => {
+    const unsub = languageStore.subscribe((l) => setLang(l));
+    return () => { unsub(); };
+  }, []);
+
+  // Update UI translations on language change
+  useEffect(() => {
+    let cancelled = false;
+    const update = async () => {
+      const to = lang?.code || 'en';
+      if (to === 'en') {
+        setI18n({
+          loadingChat: 'Loading chat…', reload: 'Reload', healthDetails: 'Health Details',
+          answerIntro: 'Answer the questions below to personalize safe guidance. You can select an option or type an answer. Use the final card to add extra conditions.',
+          anyAdditional: 'Any additional conditions or details?',
+          typeExtraPlaceholder: 'Enter any other symptoms, allergies, medications, or context...',
+          back: 'Back', next: 'Next', submitAll: 'Submit All', typeInstead: "I'll type instead above",
+          thinking: 'Thinking', searching: 'Searching', analyzing: 'Analyzing'
+        });
+        return;
+      }
+      const texts = [
+        'Loading chat…', 'Reload', 'Health Details',
+        'Answer the questions below to personalize safe guidance. You can select an option or type an answer. Use the final card to add extra conditions.',
+        'Any additional conditions or details?',
+        'Enter any other symptoms, allergies, medications, or context...',
+        'Back', 'Next', 'Submit All', "I'll type instead above",
+        'Thinking', 'Searching', 'Analyzing'
+      ];
+      try {
+        const out = await azureTranslator.translateBatch(texts, { to });
+        if (cancelled) return;
+        setI18n({
+          loadingChat: out[0], reload: out[1], healthDetails: out[2],
+          answerIntro: out[3], anyAdditional: out[4], typeExtraPlaceholder: out[5],
+          back: out[6], next: out[7], submitAll: out[8], typeInstead: out[9],
+          thinking: out[10], searching: out[11], analyzing: out[12]
+        });
+      } catch {
+        // fallback noop
+      }
+    };
+    update();
+    return () => { cancelled = true; };
+  }, [lang]);
+
+  // Translate existing messages when language changes or after generation completes
+  const rebuildTranslations = async () => {
+    const to = lang?.code || 'en';
+    if (to === 'en') { setTranslatedMap({}); return; }
+    const ids: string[] = [];
+    const texts: string[] = [];
+    for (const m of messages) {
+      ids.push(m.id);
+      texts.push(m.content);
+    }
+    try {
+      const out = await azureTranslator.translateBatch(texts, { to });
+      const map: Record<string, string> = {};
+      ids.forEach((id, i) => { map[id] = out[i]; });
+      setTranslatedMap(map);
+    } catch {
+      // ignore
+    }
+  };
+
+  useEffect(() => { if (!chatLoading) { void rebuildTranslations(); } }, [lang, chatLoading]);
+  useEffect(() => { if (!isLoading && !streamController) { void rebuildTranslations(); } }, [isLoading, streamController]);
 
   useEffect(() => {
     if (scrollLocked) scrollToBottom();
@@ -103,6 +252,9 @@ const ChatContainer = () => {
     };
   }, [isLoading, streamController]);
 
+  // Reset sticky query when switching chats or after new messages
+  useEffect(() => { setStickyQuery(null); }, [chatId, messages.length]);
+
   // Load chat history for this chatId and sync memory
   useEffect(() => {
     let cancelled = false;
@@ -131,14 +283,35 @@ const ChatContainer = () => {
         return;
       }
       if (cancelled) return;
-      const mapped: Message[] = chat.messages.map(m => ({
-        id: m.id,
-        content: m.content,
-        isBot: m.role === 'assistant',
-        timestamp: new Date(m.timestamp),
-        healthRelated: typeof m.healthRelated === 'boolean' ? m.healthRelated : false,
-        sources: m.sources,
-      }));
+      const mapped: Message[] = chat.messages.map(m => {
+        // Restore meta items from storage
+        if (m.metaItems) {
+          setMetaByMessage(prev => ({ ...prev, [m.id]: m.metaItems || [] }));
+        }
+        // Convert stored attachment URLs to File-like objects for preview
+        let attachments: File[] | undefined;
+        if (m.attachments && m.attachments.length > 0) {
+          // Create fake File objects from stored metadata for preview rendering
+          // Note: These won't be actual Files but have enough info for display
+          attachments = m.attachments.map(att => {
+            const blob = new Blob([], { type: att.type });
+            const file = new File([blob], att.name, { type: att.type });
+            // Store the Firebase URL and stored size on the file object for rendering
+            (file as any).firebaseUrl = att.url;
+            (file as any).fileSize = att.size;
+            return file;
+          });
+        }
+        return {
+          id: m.id,
+          content: m.content,
+          isBot: m.role === 'assistant',
+          timestamp: new Date(m.timestamp),
+          healthRelated: typeof m.healthRelated === 'boolean' ? m.healthRelated : false,
+          sources: m.sources,
+          attachments
+        };
+      });
       setMessages(mapped);
       const mem: MemoryMessage[] = chat.messages.map(m => ({ role: m.role, content: m.content, timestamp: m.timestamp }));
       memoryStore.setHistory(mem);
@@ -174,20 +347,8 @@ const ChatContainer = () => {
     }
     let finalMessage = message;
     
-    // Handle file uploads by adding file descriptions to message
-    if (files && files.length > 0) {
-      const fileDescriptions = files.map(file => {
-        if (file.type.startsWith('image/')) {
-          return `[Image uploaded: ${file.name}]`;
-        } else if (file.type === 'application/pdf') {
-          return `[PDF uploaded: ${file.name}]`;
-        } else {
-          return `[File uploaded: ${file.name}]`;
-        }
-      }).join('\n');
-      
-      finalMessage = `${message}\n\n${fileDescriptions}`;
-    }
+    // Do NOT append bracketed file strings to the message. We pass files to the router
+    // and show visual previews in the UI instead.
 
     // If editing, update the existing message instead of creating new one
     if (editingMessage) {
@@ -202,16 +363,34 @@ const ChatContainer = () => {
       return;
     }
 
+    const messageId = Date.now().toString();
+    let uploadedAttachments: Array<{ url: string; name: string; type: string; size: number }> | undefined;
+    
+    // Upload files to Firebase Storage if present
+    if (files && files.length > 0 && chatId) {
+      try {
+        uploadedAttachments = [];
+        for (const file of files) {
+          const attachment = await chatStore.uploadAttachment(file, chatId, messageId);
+          uploadedAttachments.push(attachment);
+        }
+      } catch (err) {
+        console.error('Failed to upload attachments:', err);
+        // Fall back to local files if upload fails
+      }
+    }
+    
     const userMessage: Message = {
-      id: Date.now().toString(),
+      id: messageId,
       content: finalMessage,
       isBot: false,
-      timestamp: new Date()
+      timestamp: new Date(),
+      attachments: files && files.length > 0 ? files : undefined
     };
 
     setMessages(prev => [...prev, userMessage]);
     if (chatId) {
-      chatStore.addMessage(chatId, 'user', finalMessage);
+      chatStore.addMessage(chatId, 'user', finalMessage, uploadedAttachments);
       chatStore.pushToCloud();
     }
     // Pick loader mode+label heuristically before routing so UI shows the right state
@@ -222,62 +401,108 @@ const ChatContainer = () => {
       const trigger = research.some(k => lower.includes(k)) || health.some(k => lower.includes(k));
       return trigger ? { mode: 'searching', label: 'Searching' } : { mode: 'thinking', label: 'Thinking' };
     };
-    const inferred = inferLoader(finalMessage);
-    setThinkingMode(inferred.mode);
-    setThinkingLabel(inferred.label);
+    // Always show a brief Routing phase first
+    setThinkingMode('routing');
+    setThinkingLabel('Routing');
     setIsLoading(true);
+    // Clear any previous meta for smooth transitions
+    setMetaByMessage({});
+    setMetaOpen({});
     try {
       const { aiRouter } = await import('@/lib/aiRouter');
-      const response = await aiRouter.route(finalMessage, chatId || undefined);
-      // If router returned intake questions, open carousel UI and DO NOT insert the interim notice into chat history.
-      if (response.intake && response.awaitingIntakeAnswers) {
-        setIntake(response.intake);
-        setAwaitingIntake(true);
-        setIsLoading(false);
+      // Decide which files to send to AI. If none provided, but the message refers to images and we have
+      // recent image attachments, reuse them so the model can see the same image in follow-ups.
+      const imageFiles = (files || []).filter(f => f.type.startsWith('image/'));
+      const mentionsImage = /\b(image|photo|picture|screenshot)\b/i.test(finalMessage) || /\bin the (image|photo|picture)\b/i.test(finalMessage);
+      let filesForAI: File[] | undefined = undefined;
+      if (imageFiles.length > 0) {
+        filesForAI = imageFiles;
+        setLastImageAttachments(imageFiles);
+      } else if (!files || files.length === 0) {
+        if (mentionsImage && lastImageAttachments && lastImageAttachments.length > 0) {
+          filesForAI = lastImageAttachments;
+        }
+      }
+      const routed = await aiRouter.routeStream(finalMessage, chatId || undefined, { files: filesForAI } as any);
+      // Intake path
+      if ((routed as any).intake && (routed as any).awaitingIntakeAnswers) {
+        const r = routed as any;
+        // Show health intake transition
+        setThinkingMode('analyzing');
+        setThinkingLabel('Preparing health questions');
+        // Keep loading visible for transition
+        setTimeout(() => {
+          setIntake(r.intake);
+          setAwaitingIntake(true);
+          setIsLoading(false);
+        }, 400);
         return;
       }
-      // Streaming / typewriter effect
-      const full = response.content;
-      // Persist an assistant placeholder message with healthRelated flag so it survives refresh
+      const starter = routed as { model: 'lite' | 'health'; isHealthRelated: boolean; start: (onChunk: (delta: string) => void, onEvent?: (evt: any) => void) => { stop: () => void; finished: Promise<{ content: string; isHealthRelated: boolean; sources?: Array<{ title: string; url: string; snippet?: string; displayUrl?: string }> }> } };
+      // Create assistant placeholder
       let botMessageId: string | undefined;
       if (chatId) {
-        botMessageId = chatStore.addMessageWithId(chatId, 'assistant', '', { healthRelated: response.isHealthRelated, sources: response.sources });
+        botMessageId = chatStore.addMessageWithId(chatId, 'assistant', '', { healthRelated: starter.isHealthRelated });
       }
       const botId = botMessageId || (Date.now() + 1).toString();
-      const botMessage: Message = {
-        id: botId,
-        content: "",
-        isBot: true,
-        timestamp: new Date(),
-        healthRelated: response.isHealthRelated,
-        sources: response.sources
-      };
-      setMessages(prev => [...prev, botMessage]);
-      let i = 0;
-      const chunk = Math.max(1, Math.round(full.length / 32));
-      let stopped = false;
-      const interval = setInterval(() => {
-        if (stopped) return;
-        i += chunk;
-        setMessages(prev => prev.map(m => m.id === botId ? { ...m, content: full.slice(0, i) } : m));
-        // Only scroll every few chunks to prevent bouncing
-        if (scrollLocked && i % (chunk * 4) === 0) scrollToBottom(true);
-        if (chatId && botMessageId) chatStore.updateMessage(chatId, botId, full.slice(0, i));
-        if (i >= full.length) {
-          clearInterval(interval);
-          if (chatId && !botMessageId) chatStore.addMessage(chatId, 'assistant', full);
-          // If we have a persisted placeholder, finalize it by updating content
-          if (chatId && botMessageId) chatStore.updateMessage(chatId, botId, full);
-          // Ensure cloud gets the finalized content
-          if (chatId) chatStore.pushToCloud();
-          setStreamController(null);
-          setIsLoading(false);
+      setMessages(prev => [...prev, { id: botId, content: '', isBot: true, timestamp: new Date(), healthRelated: starter.isHealthRelated, sources: undefined }]);
+
+      // Start streaming
+      let accumulated = '';
+      // Transition to Thinking once routing hands over to a model
+      setThinkingMode('thinking');
+      setThinkingLabel('Thinking');
+      setStreamingBotId(botId);
+      setMetaByMessage(prev => ({ ...prev, [botId]: [] }));
+      const metaAcc: MetaItem[] = [];
+      const controller = starter.start((delta: string) => {
+        accumulated += delta || '';
+        setMessages(prev => prev.map(m => m.id === botId ? { ...m, content: accumulated } : m));
+        if (scrollLocked) scrollToBottom(false);
+        if (chatId && botMessageId) chatStore.updateMessage(chatId, botId, accumulated);
+      }, (evt?: any) => {
+        if (!evt) return;
+        setMetaByMessage(prev => {
+          const arr = prev[botId] ? [...prev[botId]] : [];
+          if (evt.type === 'thought' && typeof evt.text === 'string') {
+            arr.push({ type: 'thought', text: evt.text, ts: Date.now() });
+            metaAcc.push({ type: 'thought', text: evt.text, ts: Date.now() });
+          }
+          if (evt.type === 'search_query' && typeof evt.query === 'string') {
+            // Show searching state and record the query
+            setThinkingMode('searching');
+            setThinkingLabel('Searching');
+            arr.push({ type: 'search_query', query: evt.query, ts: Date.now() });
+            metaAcc.push({ type: 'search_query', query: evt.query, ts: Date.now() });
+          }
+          // Cap to last 50 items to avoid bloat
+          const capped = arr.slice(-50);
+          // Don't save during streaming to avoid excessive writes
+          return { ...prev, [botId]: capped };
+        });
+      });
+      setStreamController({ stop: controller.stop });
+      const finished = await controller.finished;
+      // Finalize content and sources
+      const finalText = finished.content || accumulated;
+      const finalMetaItems = metaAcc.length > 0 ? metaAcc : (metaByMessage[botId] || []);
+      setMessages(prev => prev.map(m => m.id === botId ? { ...m, content: finalText, sources: finished.sources } : m));
+      if (chatId) {
+        if (!botMessageId) chatStore.addMessage(chatId, 'assistant', finalText);
+        else chatStore.updateMessage(chatId, botId, finalText);
+        if (finished.sources && finished.sources.length > 0) {
+          chatStore.updateMessageSources(chatId, botId, finished.sources);
         }
-      }, 25);
-      setStreamController({ stop: () => { stopped = true; clearInterval(interval); setStreamController(null); setIsLoading(false); if (chatId) {
-        if (botMessageId) chatStore.updateMessage(chatId, botId, full.slice(0, i)); else chatStore.addMessage(chatId, 'assistant', full.slice(0, i));
+        // Save meta items to Firebase for persistence
+        if (finalMetaItems.length > 0) {
+          chatStore.updateMessageMeta(chatId, botId, finalMetaItems);
+        }
         chatStore.pushToCloud();
-      } } });
+      }
+      setStreamingBotId(null);
+      
+      setStreamController(null);
+      setIsLoading(false);
     } catch (error) {
       const errorMessage: Message = {
         id: (Date.now() + 1).toString(),
@@ -302,51 +527,70 @@ const ChatContainer = () => {
     setIsLoading(true);
     try {
       const { aiRouter } = await import('@/lib/aiRouter');
-      const response = await aiRouter.route(jsonPayload, chatId || undefined);
-      if (response.intake && response.awaitingIntakeAnswers) {
-        setIntake(response.intake);
+      const routed = await aiRouter.routeStream(jsonPayload, chatId || undefined);
+      if ((routed as any).intake && (routed as any).awaitingIntakeAnswers) {
+        const r = routed as any;
+        setIntake(r.intake);
         setAwaitingIntake(true);
         setIsLoading(false);
         return;
       }
-      const full = response.content;
+      const starter = routed as { model: 'lite' | 'health'; isHealthRelated: boolean; start: (onChunk: (delta: string) => void, onEvent?: (evt: any) => void) => { stop: () => void; finished: Promise<{ content: string; isHealthRelated: boolean; sources?: Array<{ title: string; url: string; snippet?: string; displayUrl?: string }> }> } };
       let botMessageId: string | undefined;
       if (chatId) {
-        botMessageId = chatStore.addMessageWithId(chatId, 'assistant', '', { healthRelated: response.isHealthRelated, sources: response.sources });
+        botMessageId = chatStore.addMessageWithId(chatId, 'assistant', '', { healthRelated: starter.isHealthRelated });
       }
       const botId = botMessageId || (Date.now() + 1).toString();
-      const botMessage: Message = {
-        id: botId,
-        content: "",
-        isBot: true,
-        timestamp: new Date(),
-        healthRelated: response.isHealthRelated,
-        sources: response.sources
-      };
-      setMessages(prev => [...prev, botMessage]);
-      let i = 0;
-      const chunk = Math.max(1, Math.round(full.length / 32));
-      let stopped = false;
-      const interval = setInterval(() => {
-        if (stopped) return;
-        i += chunk;
-        setMessages(prev => prev.map(m => m.id === botId ? { ...m, content: full.slice(0, i) } : m));
-        // Only scroll every few chunks to prevent bouncing
-        if (scrollLocked && i % (chunk * 4) === 0) scrollToBottom(true);
-        if (chatId && botMessageId) chatStore.updateMessage(chatId, botId, full.slice(0, i));
-        if (i >= full.length) {
-          clearInterval(interval);
-          if (chatId && !botMessageId) chatStore.addMessage(chatId, 'assistant', full);
-          if (chatId && botMessageId) chatStore.updateMessage(chatId, botId, full);
-          if (chatId) chatStore.pushToCloud();
-          setStreamController(null);
-          setIsLoading(false);
+      setMessages(prev => [...prev, { id: botId, content: '', isBot: true, timestamp: new Date(), healthRelated: starter.isHealthRelated, sources: undefined }]);
+      let accumulated = '';
+      setThinkingMode('thinking');
+      setThinkingLabel('Analyzing health context');
+      setStreamingBotId(botId);
+      setMetaByMessage(prev => ({ ...prev, [botId]: [] }));
+      const metaAcc: MetaItem[] = [];
+      const controller = starter.start((delta: string) => {
+        accumulated += delta || '';
+        setMessages(prev => prev.map(m => m.id === botId ? { ...m, content: accumulated } : m));
+        if (scrollLocked) scrollToBottom(false);
+        if (chatId && botMessageId) chatStore.updateMessage(chatId, botId, accumulated);
+      }, (evt?: any) => {
+        if (!evt) return;
+        setMetaByMessage(prev => {
+          const arr = prev[botId] ? [...prev[botId]] : [];
+          if (evt.type === 'thought' && typeof evt.text === 'string') {
+            arr.push({ type: 'thought', text: evt.text, ts: Date.now() });
+            metaAcc.push({ type: 'thought', text: evt.text, ts: Date.now() });
+          }
+          if (evt.type === 'search_query' && typeof evt.query === 'string') {
+            setThinkingMode('searching');
+            setThinkingLabel('Searching');
+            arr.push({ type: 'search_query', query: evt.query, ts: Date.now() });
+            metaAcc.push({ type: 'search_query', query: evt.query, ts: Date.now() });
+          }
+          return { ...prev, [botId]: arr.slice(-50) };
+        });
+      });
+      setStreamController({ stop: controller.stop });
+      const finished = await controller.finished;
+      const finalText = finished.content || accumulated;
+      const finalMetaItems = metaAcc.length > 0 ? metaAcc : (metaByMessage[botId] || []);
+      setMessages(prev => prev.map(m => m.id === botId ? { ...m, content: finalText, sources: finished.sources } : m));
+      if (chatId) {
+        if (!botMessageId) chatStore.addMessage(chatId, 'assistant', finalText);
+        else chatStore.updateMessage(chatId, botId, finalText);
+        if (finished.sources && finished.sources.length > 0) {
+          chatStore.updateMessageSources(chatId, botId, finished.sources);
         }
-      }, 25);
-      setStreamController({ stop: () => { stopped = true; clearInterval(interval); setStreamController(null); setIsLoading(false); if (chatId) {
-        if (botMessageId) chatStore.updateMessage(chatId, botId, full.slice(0, i)); else chatStore.addMessage(chatId, 'assistant', full.slice(0, i));
+        // Save meta items to Firebase for persistence
+        if (finalMetaItems.length > 0) {
+          chatStore.updateMessageMeta(chatId, botId, finalMetaItems);
+        }
         chatStore.pushToCloud();
-      } } });
+      }
+      setStreamingBotId(null);
+      
+      setStreamController(null);
+      setIsLoading(false);
     } catch (error) {
       const errorMessage: Message = {
         id: (Date.now() + 1).toString(),
@@ -372,18 +616,18 @@ const ChatContainer = () => {
   };
 
   return (
-    <div className="flex flex-col h-full bg-background overflow-hidden" aria-busy={isLoading || chatLoading ? true : undefined} data-loading={isLoading || chatLoading ? 'true' : undefined}>
+    <div className="flex flex-col h-full bg-background overflow-hidden" style={{ backgroundColor: '#fff' }} aria-busy={isLoading || chatLoading ? true : undefined} data-loading={isLoading || chatLoading ? 'true' : undefined}>
       <ChatHeader />
       {/* Controls removed; managed in Settings dialog */}
       <div className="flex-1 min-h-0 overflow-hidden flex flex-col">
-        {chatLoading && (
-          <div className="flex-1 flex flex-col items-center justify-center gap-2 text-xs text-muted-foreground">
-            <span>Loading chat…</span>
-            {Date.now() - chatLoadStartedAt > 3000 && (
-              <button onClick={() => window.location.reload()} className="text-primary underline">Reload</button>
-            )}
-          </div>
-        )}
+            {chatLoading && (
+              <div className="flex-1 flex flex-col items-center justify-center gap-2 text-xs text-muted-foreground">
+            <span>{i18n.loadingChat}</span>
+              {Date.now() - chatLoadStartedAt > 3000 && (
+                <button onClick={() => window.location.reload()} className="text-primary underline">{i18n.reload}</button>
+              )}
+            </div>
+          )}
         {!chatLoading && messages.length === 0 ? (
           <WelcomeScreen onSendMessage={handleSendMessage} />
         ) : (
@@ -391,17 +635,75 @@ const ChatContainer = () => {
             <ScrollArea className="flex-1 overflow-y-auto" ref={scrollAreaRef}>
               <div className="min-h-full mx-auto px-4 sm:px-6 lg:px-8 xl:px-16 py-8" style={{ maxWidth: 900 }}>
                 {messages.map((message, index) => (
-                  <div key={message.id}>
+                  <div 
+                    key={message.id}
+                    data-message-id={message.id}
+                    data-message-role={message.isBot ? 'assistant' : 'user'}
+                    data-message-content={message.content}
+                  >
                     {/* Show divider after complete exchanges (before new user questions) */}
                     {index > 0 && !message.isBot && messages[index - 1]?.isBot && (
-                      <div className="border-t border-border/50 my-8" />
+                      <div className="border-t border-border/80 my-8" />
                     )}
                     <div className={message.isBot ? 'animate-fade-in' : ''}>
                       {!message.isBot ? (
                       <>
                         <div className="mb-6">
-                          <h1 className="text-lg sm:text-xl md:text-[22px] font-normal text-foreground leading-tight">{message.content}</h1>
+                          <h1 className="text-lg sm:text-xl md:text-[22px] font-normal text-foreground leading-tight">
+                            {(() => {
+                              // Use translated content if language selected
+                              const contentToShow = lang.code === 'en' ? message.content : (translatedMap[message.id] || message.content);
+                              // Auto-link URLs in the content
+                              const linkRegex = /(?:https?:\/\/)?(?:www\.)?[a-z0-9-]+(?:\.[a-z0-9-]+)+(?:[\/?#][^\s]*)?/gi;
+                              const contentParts = contentToShow.split(linkRegex);
+                              const matchesFinal = contentToShow.match(linkRegex) || [];
+                              return contentParts.map((part, i) => (
+                                <React.Fragment key={i}>
+                                  {part}
+                                  {matchesFinal[i] && (
+                                    <a 
+                                      href={matchesFinal[i].startsWith('http') ? matchesFinal[i] : `https://${matchesFinal[i]}`}
+                                      target="_blank"
+                                      rel="noopener noreferrer"
+                                      className="text-orange-500 hover:text-orange-600 underline underline-offset-2 inline-flex items-center gap-1"
+                                    >
+                                      {matchesFinal[i]}
+                                      <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
+                                      </svg>
+                                    </a>
+                                  )}
+                                </React.Fragment>
+                              ));
+                            })()}
+                          </h1>
                         </div>
+                        {Array.isArray(message.attachments) && message.attachments.length > 0 && (
+                          <div className="mt-3 flex flex-wrap gap-2">
+                            {message.attachments.map((file, i) => {
+                              const isImage = file.type.startsWith('image/');
+                              const isPdf = file.type === 'application/pdf';
+                              // Use Firebase URL if available, otherwise create object URL
+                              const url = isImage ? ((file as any).firebaseUrl || URL.createObjectURL(file)) : undefined;
+                              const fileSize = (file as any).fileSize ?? file.size;
+                              return (
+                                <div key={i} className="border rounded-md bg-muted p-2 flex items-center gap-2">
+                                  {isImage ? (
+                                    <img src={url} alt={file.name} className="w-20 h-20 object-cover rounded" />
+                                  ) : (
+                                    <div className="w-10 h-10 flex items-center justify-center bg-muted rounded text-xs">
+                                      {isPdf ? 'PDF' : (file.type?.split('/')?.[1] || 'FILE').toUpperCase()}
+                                    </div>
+                                  )}
+                                  <div className="min-w-0">
+                                    <div className="text-xs font-medium truncate max-w-[220px]">{file.name}</div>
+                                    <div className="text-[10px] text-muted-foreground">{(fileSize / 1024 / 1024).toFixed(2)} MB</div>
+                                  </div>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        )}
                         {/* Show sources right after question if next message is bot with sources */}
                         {messages[index + 1]?.isBot && messages[index + 1]?.sources && (
                           <SourcesDisplay sources={messages[index + 1].sources} className="mb-4" />
@@ -409,15 +711,19 @@ const ChatContainer = () => {
                       </>
                     ) : (
                       <ChatMessage
-                        message={message.content}
+                        message={lang.code === 'en' ? message.content : (translatedMap[message.id] || message.content)}
                         isBot={message.isBot}
                         timestamp={message.timestamp}
+                        isThinking={streamingBotId === message.id}
                         healthRelated={message.healthRelated}
                         onEdit={undefined}
                         userAvatar={undefined}
                         thinkingMode={thinkingMode}
                         thinkingLabel={thinkingLabel}
-                        sources={undefined} // Don't show sources in ChatMessage anymore
+                        sources={undefined}
+                        metaItems={metaByMessage[message.id]}
+                        metaOpen={false}
+                        onToggleMeta={undefined}
                       />
                     )}
                     </div>
@@ -425,14 +731,15 @@ const ChatContainer = () => {
                 ))}
               {/* Show loading below user message */}
               {isLoading && !streamController && messages.length > 0 && messages[messages.length - 1].isBot === false && (
-                <div className="mt-8 flex justify-center">
-                  <div className="flex items-center gap-2 text-muted-foreground">
-                    <div className="flex gap-1">
-                      <div className="w-2 h-2 bg-primary rounded-full animate-bounce" style={{animationDelay: '0ms'}} />
-                      <div className="w-2 h-2 bg-primary rounded-full animate-bounce" style={{animationDelay: '150ms'}} />
-                      <div className="w-2 h-2 bg-primary rounded-full animate-bounce" style={{animationDelay: '300ms'}} />
+                <div className="mt-8 w-full max-w-3xl mx-auto">
+                  <div className="w-full">
+                    <div className="mb-3">
+                      <LoadingAnimation 
+                        mode={thinkingMode}
+                        label={thinkingLabel}
+                        className="" 
+                      />
                     </div>
-                    <span className="text-sm">{thinkingLabel}</span>
                   </div>
                 </div>
               )}
@@ -440,13 +747,21 @@ const ChatContainer = () => {
             </ScrollArea>
             {showScrollButton && (
               <Button
-                onClick={() => scrollToBottom(true)}
-                className="absolute bottom-24 right-6 rounded-full shadow-lg"
+                onClick={() => scrollToBottom(true, true)}
+                className="absolute bottom-24 right-6 rounded-full shadow-lg z-10"
                 size="icon"
                 variant="secondary"
               >
                 <ChevronDown className="h-4 w-4" />
               </Button>
+            )}
+            {/* Sticky Query (compact pill, only visible when scrolled) */}
+            {stickyQuery?.isVisible && stickyQuery.content && (
+              <div className="absolute top-0 left-0 right-0 z-10 flex justify-center pt-2 pointer-events-none">
+                <div className="pointer-events-auto max-w-[80%] px-3 py-1.5 rounded-full bg-background/95 border shadow-sm text-xs text-foreground/80 truncate">
+                  {stickyQuery.content}
+                </div>
+              </div>
             )}
           </>
         )}
@@ -461,99 +776,21 @@ const ChatContainer = () => {
           chatId={chatId || undefined}
         />
         {awaitingIntake && intake && (
-          <div className="fixed inset-0 z-40 flex items-center justify-center">
-            <div className="absolute inset-0 bg-black/40" />
-            <div className="relative w-full max-w-2xl p-6">
-              <div className="bg-background rounded-lg p-6 shadow-lg">
-                <div className="flex items-center justify-between mb-3">
-                  <h3 className="text-lg font-semibold">Health Details</h3>
-                  <span className="text-xs text-muted-foreground">
-                    {(() => {
-                      const total = (intake?.questions?.length ?? 0) + 1;
-                      const current = Math.min(intakeIndex + 1, total);
-                      return `${current}/${total}`;
-                    })()}
-                  </span>
-                </div>
-                <p className="text-sm text-muted-foreground mb-4">Answer the questions below to personalize safe guidance. You can select an option or type an answer. Use the final card to add extra conditions.</p>
-                <div className="min-h-[140px]">
-                  {intake.questions.length > 0 && intakeIndex < intake.questions.length ? (
-                    (() => {
-                      const q = intake.questions[intakeIndex];
-                      return (
-                        <div key={q.id} className="rounded-lg border bg-background p-4 space-y-3">
-                          <p className="font-medium">{q.text}</p>
-                          {Array.isArray(q.options) && q.options.length > 0 && (
-                            <div className="flex flex-wrap gap-2">
-                              {q.options.map(opt => {
-                                const active = intakeAnswers[q.id] === opt;
-                                return (
-                                  <button
-                                    key={opt}
-                                    onClick={() => setIntakeAnswers(a => ({ ...a, [q.id]: opt }))}
-                                    className={`px-3 py-1 rounded text-sm border transition ${active ? 'bg-primary text-primary-foreground border-primary' : 'hover:bg-muted'}`}
-                                  >{opt}</button>
-                                );
-                              })}
-                            </div>
-                          )}
-                          <input
-                            className="w-full px-3 py-2 text-sm rounded border bg-background"
-                            placeholder="Type answer (or pick an option above)..."
-                            value={intakeAnswers[q.id] || ''}
-                            onChange={e => setIntakeAnswers(a => ({ ...a, [q.id]: e.target.value }))}
-                          />
-                        </div>
-                      );
-                    })()
-                  ) : (
-                    <div className="rounded-lg border bg-background p-4 space-y-3">
-                      <p className="font-medium">Any additional conditions or details?</p>
-                      <textarea
-                        className="w-full h-28 px-3 py-2 text-sm rounded border bg-background"
-                        placeholder="Enter any other symptoms, allergies, medications, or context..."
-                        value={intakeAnswers['__extra'] || ''}
-                        onChange={e => setIntakeAnswers(a => ({ ...a, ['__extra']: e.target.value }))}
-                      />
-                    </div>
-                  )}
-                </div>
-                <div className="flex items-center justify-between gap-3 mt-4">
-                  <div className="flex gap-2">
-                    <button
-                      onClick={() => { if (intakeIndex > 0) setIntakeIndex(i => i - 1); }}
-                      className="px-3 py-1.5 rounded-md border text-sm"
-                      disabled={intakeIndex === 0}
-                    >Back</button>
-                    {intakeIndex < intake.questions.length ? (
-                      <button
-                        onClick={() => { setIntakeIndex(i => Math.min(i + 1, intake.questions.length)); }}
-                        className="px-3 py-1.5 rounded-md bg-primary text-primary-foreground text-sm"
-                      >Next</button>
-                    ) : (
-                      <button
-                        onClick={() => {
-                          const jsonPayload = JSON.stringify({ intakeAnswers }, null, 2);
-                          setAwaitingIntake(false);
-                          setIntake(null);
-                          setIntakeAnswers({});
-                          setIntakeIndex(0);
-                          setTimeout(() => submitIntake(jsonPayload), 0);
-                        }}
-                        className="px-3 py-1.5 rounded-md bg-primary text-primary-foreground text-sm"
-                      >Submit All</button>
-                    )}
-                  </div>
-                  <div className="text-sm">
-                    <button
-                      onClick={() => { setAwaitingIntake(false); setIntake(null); setIntakeAnswers({}); setIntakeIndex(0); }}
-                      className="px-3 py-1.5 rounded-md border text-sm"
-                    >I'll type instead above</button>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
+          <HealthIntakeModal
+            questions={intake.questions}
+            onSubmit={(answers) => {
+              const jsonPayload = JSON.stringify({ intakeAnswers: answers }, null, 2);
+              setAwaitingIntake(false);
+              setIntake(null);
+              setIntakeAnswers({});
+              setTimeout(() => submitIntake(jsonPayload), 0);
+            }}
+            onClose={() => {
+              setAwaitingIntake(false);
+              setIntake(null);
+              setIntakeAnswers({});
+            }}
+          />
         )}
       </div>
     </div>
@@ -561,3 +798,5 @@ const ChatContainer = () => {
 };
 
 export default ChatContainer;
+
+

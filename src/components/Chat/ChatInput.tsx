@@ -1,10 +1,15 @@
-import React, { useState, useRef } from "react";
-import { Send, Mic, Paperclip, Loader2 } from "lucide-react";
+import React, { useEffect, useMemo, useState, useRef } from "react";
+import { useNavigate } from "react-router-dom";
+import { Send, Paperclip, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
 import { FilePreview } from "./FilePreview";
 import { useToast } from "@/hooks/use-toast";
+import { VoiceGlyph } from "@/components/icons/VoiceGlyph";
+import { languageStore } from "@/lib/languageStore";
+import { INDIAN_LANGUAGES, GLOBAL_LANGUAGES } from "@/lib/languages";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 
 interface ChatInputProps {
   onSendMessage: (message: string, files?: File[]) => void;
@@ -17,6 +22,7 @@ interface ChatInputProps {
 }
 
 const ChatInput = ({ onSendMessage, isLoading, editMessage, onCancelEdit, showExamplesAnimation, onStopGeneration, chatId }: ChatInputProps) => {
+  const navigate = useNavigate();
   const [message, setMessage] = useState(() => {
     if (editMessage) return editMessage;
     if (chatId) {
@@ -27,6 +33,29 @@ const ChatInput = ({ onSendMessage, isLoading, editMessage, onCancelEdit, showEx
   const [files, setFiles] = useState<File[]>([]);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const { toast } = useToast();
+  const [lang, setLang] = useState(() => languageStore.get());
+  useEffect(() => {
+    const unsub = languageStore.subscribe(setLang);
+    return () => unsub();
+  }, []);
+  const allLanguages = useMemo(() => {
+    // show English first, then Indian, then remaining globals (excluding duplicate English)
+    const seen = new Set<string>();
+    const list = [
+      ...GLOBAL_LANGUAGES,
+      ...INDIAN_LANGUAGES,
+    ].filter(l => {
+      if (seen.has(l.code)) return false;
+      seen.add(l.code);
+      return true;
+    });
+    return list;
+  }, []);
+  const selectedLabel = useMemo(() => {
+    const found = allLanguages.find(l => l.code === lang.code);
+    return found?.label || 'English';
+  }, [allLanguages, lang.code]);
+  const selectedInitial = useMemo(() => selectedLabel.charAt(0), [selectedLabel]);
   const placeholder = "Ask something...";
 
   React.useEffect(() => {
@@ -112,10 +141,33 @@ const ChatInput = ({ onSendMessage, isLoading, editMessage, onCancelEdit, showEx
                   }
                 }}
                 placeholder={placeholder}
-                className="min-h-[56px] max-h-[200px] pr-24 resize-none rounded-xl border border-border bg-muted/30 focus:bg-background transition-colors"
+                className="min-h-[56px] max-h-[200px] pr-36 resize-none rounded-xl border border-border bg-muted focus:bg-background transition-colors"
                 disabled={isLoading}
               />
               <div className="absolute right-2 bottom-2 flex items-center gap-1">
+                {/* Language selector */}
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <Button
+                      type="button"
+                      size="icon"
+                      variant="secondary"
+                      className="h-8 w-8 rounded-full font-semibold"
+                      aria-label={`Change language (current: ${selectedLabel})`}
+                      title={selectedLabel}
+                    >
+                      {selectedInitial}
+                    </Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="end" className="w-64 max-h-56 overflow-y-auto bg-background">
+                    {allLanguages.map((l) => (
+                      <DropdownMenuItem key={l.code} onClick={() => languageStore.set(l.code)}>
+                        <span className="mr-2 w-4 inline-block text-primary">{lang.code === l.code ? '✓' : ''}</span>
+                        <span>{l.label}</span>
+                      </DropdownMenuItem>
+                    ))}
+                  </DropdownMenuContent>
+                </DropdownMenu>
                 <input
                   ref={fileInputRef}
                   type="file"
@@ -144,14 +196,28 @@ const ChatInput = ({ onSendMessage, isLoading, editMessage, onCancelEdit, showEx
                     <Loader2 className="h-4 w-4 animate-spin" />
                   </Button>
                 ) : (
-                  <Button
-                    type="submit"
-                    size="icon"
-                    disabled={!message.trim() || isLoading}
-                    className="bg-primary hover:bg-primary/90"
-                  >
-                    <Send className="h-4 w-4" />
-                  </Button>
+                  message.trim().length === 0 ? (
+                    <Button
+                      type="button"
+                      size="icon"
+                      className="bg-orange-500 hover:bg-orange-600 text-white"
+                      onClick={() => navigate('/voice')}
+                      aria-label="Voice mode"
+                      disabled={isLoading}
+                    >
+                      <VoiceGlyph size={16} className="h-4 w-4 text-white" />
+                    </Button>
+                  ) : (
+                    <Button
+                      type="submit"
+                      size="icon"
+                      disabled={!message.trim() || isLoading}
+                      className="bg-primary hover:bg-primary/90"
+                      aria-label="Send message"
+                    >
+                      <Send className="h-4 w-4" />
+                    </Button>
+                  )
                 )}
               </div>
             </div>

@@ -86,7 +86,7 @@ export const ThinkingLoader: React.FC<ThinkingLoaderProps> = ({
             cellSizeClass,
             active
               ? 'bg-primary/90 shadow-glow'
-              : 'bg-muted/30'
+              : 'bg-muted'
           )}
         />
       );

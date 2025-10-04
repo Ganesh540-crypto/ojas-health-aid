@@ -1,6 +1,7 @@
 import { initializeApp } from 'firebase/app';
 import { getAuth, GoogleAuthProvider } from 'firebase/auth';
 import { getDatabase } from 'firebase/database';
+import { getStorage } from 'firebase/storage';
 
 const firebaseConfig = {
   apiKey: import.meta.env.VITE_FIREBASE_API_KEY as string,
@@ -20,3 +21,4 @@ if (!firebaseConfig.databaseURL) {
   console.warn('Firebase Realtime Database URL (VITE_FIREBASE_DATABASE_URL) is missing. Cloud chat sync will fail.');
 }
 export const db = getDatabase(firebaseApp);
+export const storage = getStorage(firebaseApp);

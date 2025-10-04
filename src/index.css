@@ -6,6 +6,11 @@
 @tailwind components;
 @tailwind utilities;
 
+/* Global 110% scale for entire app */
+:root {
+  font-size: 17.6px; /* 110% of default 16px */
+}
+
 /* Custom list styles for better hierarchy */
 @layer components {
   /* Main numbered lists */
@@ -52,6 +57,43 @@
     left: 0;
     color: rgb(107 114 128);
   }
+
+  /* Dark theme tokens */
+  .dark {
+    /* Base */
+    --background: 222.2 84% 4.9%;
+    --foreground: 210 40% 98%;
+    --card: 222.2 84% 5.5%;
+    --card-foreground: 210 40% 98%;
+    --popover: 222.2 84% 5.5%;
+    --popover-foreground: 210 40% 98%;
+
+    /* Brand */
+    --primary: 20 90% 52%;
+    --primary-hover: 20 90% 47%;
+    --primary-foreground: 0 0% 100%;
+
+    /* Surfaces */
+    --secondary: 217.2 32.6% 17.5%;
+    --secondary-foreground: 210 40% 98%;
+    --muted: 217.2 32.6% 17.5%;
+    --muted-foreground: 215 20.2% 65.1%;
+    --accent: 217.2 32.6% 17.5%;
+    --accent-foreground: 210 40% 98%;
+    --border: 217.2 32.6% 17.5%;
+    --input: 217.2 32.6% 17.5%;
+    --ring: 20 90% 52%;
+
+    /* Status */
+    --success: 142 70% 45%;
+    --warning: 45 95% 60%;
+    --destructive: 0 72% 52%;
+    --destructive-foreground: 210 40% 98%;
+    --info: 210 90% 65%;
+  }
+
+  /* Removed true-black variant to avoid dark flash on refresh */
+
 }
 
 /* Animations */

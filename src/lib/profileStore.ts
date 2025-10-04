@@ -1,6 +1,8 @@
 export interface UserProfile {
-  name?: string;
+  name?: string; // Display name
   email?: string;
+  username?: string; // Handle-like username
+  photoUrl?: string; // Uploaded profile photo URL (Firebase Storage)
   age?: number;
   heightCm?: number;
   weightKg?: number;
