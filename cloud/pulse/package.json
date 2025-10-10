@@ -1,0 +1,25 @@
+{
+  "name": "ojas-pulse-functions",
+  "version": "0.1.0",
+  "private": true,
+  "main": "dist/index.js",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "start": "node dist/index.js",
+    "gcp-build": "npm run build"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "@google-cloud/firestore": "^7.10.0",
+    "@google-cloud/pubsub": "^4.7.3",
+    "@google/genai": "^1.0.0",
+    "googleapis": "^132.0.0",
+    "axios": "^1.7.7",
+    "rss-parser": "^3.13.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.6.3"
+  }
+}

@@ -258,16 +258,9 @@ ${options?.historyText ? `CONVERSATION HISTORY:\n${options.historyText}` : ''}`;
     
     // Removed verbose logging
     const lang = languageStore.get();
-    const languageNote = lang && lang.code !== 'en'
-      ? `
-⚠️ CRITICAL LANGUAGE INSTRUCTION: The user has selected ${lang.label} (${lang.code}).
-YOU MUST RESPOND ENTIRELY IN ${lang.label.toUpperCase()}.
-Generate ALL content (headers, lists, explanations, examples) directly in ${lang.label}.
-DO NOT write in English. Think and respond natively in ${lang.label}.
-`
-      : '';
+    const languageNote = `LANGUAGE PREFERENCE: ${lang?.label || 'English'} (${lang?.code || 'en'}). Respond ONLY in ${lang?.label || 'English'}. Do not code-switch unless explicitly asked.`;
     const config: Record<string, any> = { 
-      systemInstruction: `${OJAS_LITE_SYSTEM}\n\n${this.getCurrentTimeContext()}${languageNote ? `\n\n${languageNote}` : ''}`,
+      systemInstruction: `${OJAS_LITE_SYSTEM}\n\n${this.getCurrentTimeContext()}\n\n${languageNote}`,
       generationConfig: {
         temperature: 0.7,
         maxOutputTokens: options?.maxTokens ?? 8192
@@ -391,16 +384,9 @@ DO NOT write in English. Think and respond natively in ${lang.label}.
         /\b(latest|recent|news|today|yesterday|tomorrow|this week|this month|this year|next week|next month|next year|202[4-9]|update|changed|price|cost|mrp|compare|comparison|availability|stock|buy|where to|market|launch|release|schedule|fixture|fixtures|when|start|date|month|year|season|tournament|ipl|match|guideline|policy|regulation|study|trial|paper|review|india|WHO|FDA|EMA|NICE|best|top|under|rupees|rs|laptop|mobile|phone|graphics|card|rtx|gtx|2050|gaming)\b/i.test(message)
       );
       const lang = languageStore.get();
-      const languageNote = lang && lang.code !== 'en'
-        ? `
-⚠️ CRITICAL LANGUAGE INSTRUCTION: The user has selected ${lang.label} (${lang.code}).
-YOU MUST RESPOND ENTIRELY IN ${lang.label.toUpperCase()}.
-Generate ALL content (headers, lists, explanations, examples) directly in ${lang.label}.
-DO NOT write in English. Think and respond natively in ${lang.label}.
-`
-        : '';
+      const languageNote = `LANGUAGE PREFERENCE: ${lang?.label || 'English'} (${lang?.code || 'en'}). Respond ONLY in ${lang?.label || 'English'}. Do not code-switch unless explicitly asked.`;
       const config: Record<string, any> = {
-        systemInstruction: `${OJAS_LITE_SYSTEM}\n\n${this.getCurrentTimeContext()}${languageNote ? `\n\n${languageNote}` : ''}`,
+        systemInstruction: `${OJAS_LITE_SYSTEM}\n\n${this.getCurrentTimeContext()}\n\n${languageNote}`,
         generationConfig: { temperature: 0.7, maxOutputTokens: options?.maxTokens ?? 8192 }
       };
       const tools: any[] = [];

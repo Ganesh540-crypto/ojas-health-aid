@@ -11,7 +11,7 @@ import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { LoadingAnimation } from '@/components/ui/loading-animation';
-import SourcesDisplay from '@/components/Chat/SourcesDisplay';
+import SourcesDisplay from '@/features/chat/components/SourcesDisplay';
 import ThoughtsPanel from '@/components/Chat/ThoughtsPanel';
 
 interface ChatMessageProps {

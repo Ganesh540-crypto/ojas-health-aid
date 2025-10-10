@@ -1,11 +1,11 @@
 import { Link, Outlet, useLocation, useNavigate } from "react-router-dom";
-import { Plus, Settings, MoreHorizontal, Pencil, Trash2, LogOut, MessageSquare, User } from "lucide-react";
+import { Plus, Settings, MoreHorizontal, Pencil, Trash2, LogOut, MessageSquare, User, Activity } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 import { Button } from "@/components/ui/button";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger, DropdownMenuLabel, DropdownMenuSeparator } from "@/components/ui/dropdown-menu";
 import { chatStore } from "@/lib/chatStore";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { auth } from "@/lib/firebase";
 
 import {
@@ -30,6 +30,31 @@ export default function AppShell() {
   const location = useLocation();
   const navigate = useNavigate();
   const { toast } = useToast();
+  // Collapsible Home sidebar state
+  const [homeOpen, setHomeOpen] = useState(false); // pinned open by click
+  const [homeHover, setHomeHover] = useState(false); // temporarily open on hover
+  const isHomeVisible = homeOpen || homeHover;
+  const hoverCloseTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const homeOpenRef = useRef(homeOpen);
+
+  useEffect(() => {
+    homeOpenRef.current = homeOpen;
+  }, [homeOpen]);
+
+  const cancelHoverCloseDelay = () => {
+    if (hoverCloseTimer.current) {
+      clearTimeout(hoverCloseTimer.current);
+      hoverCloseTimer.current = null;
+    }
+  };
+  const startHoverCloseDelay = () => {
+    if (homeOpenRef.current) return; // don't auto-close if pinned open
+    cancelHoverCloseDelay();
+    hoverCloseTimer.current = setTimeout(() => {
+      setHomeHover(false);
+      hoverCloseTimer.current = null;
+    }, 300); // 0.7s delay
+  };
   const [openSettings, setOpenSettings] = useState(false);
   const [settings, setSettings] = useState<{ notifications: boolean; theme: 'light' | 'dark' | 'system'; accent: 'orange' | 'blue' | 'green'; compact: boolean; scrollLock: boolean; }>({ notifications: true, theme: 'system', accent: 'orange', compact: false, scrollLock: true });
   const email = auth.currentUser?.email || 'Account';
@@ -98,12 +123,14 @@ export default function AppShell() {
   };
 
   return (
-    <div className="flex h-screen bg-background">
-      {/* Icon Rail - Narrow left sidebar */}
-      <div className="w-[60px] bg-[#fafafa] border-r border-gray-200 flex flex-col items-center py-4">
+    <div className="flex h-screen bg-background relative">
+      {/* Icon Rail - Narrow left sidebar (hover opens Home) */}
+      <div
+        className="w-[68px] bg-[#fafafa] border-r border-gray-200 flex flex-col items-center py-4"
+      >
         {/* Logo */}
         <div className="mb-8">
-          <img src="/logo-jas.svg" alt="Ojas" className="h-7 w-7" />
+          <img src="/logo-jas.svg" alt="Ojas" className="h-8 w-8" />
         </div>
         
         {/* New Chat Button */}
@@ -114,11 +141,44 @@ export default function AppShell() {
           <Plus className="h-5 w-5 text-gray-600" />
         </button>
         
-        {/* Home/Chats Icon */}
-        <button className="w-10 h-10 rounded-lg hover:bg-gray-100 flex items-center justify-center mb-2 transition-colors">
+        {/* Home/Chats Icon - open Chat interface and reveal Home sidebar */}
+        <button
+          className={cn(
+            "w-10 h-10 rounded-lg flex items-center justify-center mb-0 transition-colors",
+            isHomeVisible ? "bg-gray-200 text-gray-900" : "hover:bg-gray-100"
+          )}
+          onClick={() => {
+            cancelHoverCloseDelay();
+            // Navigate to chat interface (home)
+            navigate('/');
+            // Ensure the Home sidebar is visible
+            setHomeOpen(true);
+            setHomeHover(true);
+          }}
+          onMouseEnter={() => {
+            cancelHoverCloseDelay();
+            setHomeHover(true);
+          }}
+          onMouseLeave={startHoverCloseDelay}
+          aria-pressed={isHomeVisible}
+          aria-label="Toggle Home"
+        >
           <MessageSquare className="h-5 w-5 text-gray-600" />
         </button>
-        <span className="text-[10px] text-gray-500 mb-6">Home</span>
+        <span className="text-[10px] text-gray-500 mt-0 mb-1 leading-tight">Home</span>
+        
+        {/* Pulse Feed */}
+        <button
+          className={cn(
+            "w-10 h-10 rounded-lg flex items-center justify-center mb-0 transition-colors",
+            location.pathname === '/pulse' ? "bg-gray-200 text-gray-900" : "hover:bg-gray-100"
+          )}
+          onClick={() => navigate('/pulse')}
+          aria-label="Pulse"
+        >
+          <Activity className="h-5 w-5 text-gray-600" />
+        </button>
+        <span className="text-[10px] text-gray-500 mt-0 mb-1 leading-tight">Pulse</span>
         
         {/* Spacer */}
         <div className="flex-1" />
@@ -126,7 +186,7 @@ export default function AppShell() {
         {/* Profile Icon */}
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
-            <button className="w-10 h-10 rounded-lg hover:bg-gray-100 flex items-center justify-center mb-2 transition-colors">
+            <button className="w-10 h-10 rounded-lg hover:bg-gray-100 flex items-center justify-center mb-0 transition-colors">
               <Avatar className="h-7 w-7">
                 <AvatarImage src={photoUrl || authPhoto} alt="profile" />
                 <AvatarFallback className="text-[10px] bg-gray-200">{initial}</AvatarFallback>
@@ -144,11 +204,22 @@ export default function AppShell() {
             </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
-        <span className="text-[10px] text-gray-500">Account</span>
+        <span className="text-[10px] text-gray-500 mt-0 leading-tight">Account</span>
       </div>
 
-      {/* Content Panel - Chat list */}
-      <div className="w-[280px] bg-white border-r border-gray-200 flex flex-col">
+      {/* Content Panel - Chat list (collapsible overlay) */}
+      <div
+        className={cn(
+          "absolute inset-y-0 left-[68px] bg-white border-r border-gray-200 flex flex-col overflow-hidden transition-[width] duration-300 ease-out z-20",
+          isHomeVisible ? "w-[280px]" : "w-0 pointer-events-none"
+        )}
+        aria-hidden={!isHomeVisible}
+        onMouseEnter={() => {
+          cancelHoverCloseDelay();
+          setHomeHover(true);
+        }}
+        onMouseLeave={startHoverCloseDelay}
+      >
         {/* Header */}
         <div className="px-4 py-4 border-b border-gray-100">
           <h2 className="text-sm font-medium text-gray-900">Home</h2>
@@ -204,19 +275,11 @@ export default function AppShell() {
           </div>
         </div>
         
-        {/* Footer */}
-        <div className="px-3 py-3 border-t border-gray-100">
-          <button 
-            onClick={() => setOpenSettings(true)}
-            className="w-full text-left text-sm text-gray-600 hover:text-gray-900 px-2 py-1 rounded hover:bg-gray-50 transition-colors"
-          >
-            Settings
-          </button>
-        </div>
+        {/* Footer removed as requested */}
       </div>
 
       {/* Main Content Area */}
-      <div className="flex-1 flex flex-col overflow-hidden">
+      <div className="flex-1 flex flex-col overflow-y-auto">
         <Outlet />
       </div>
 

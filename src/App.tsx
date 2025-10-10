@@ -16,6 +16,8 @@ const AuthPage = React.lazy(() => import('./pages/Auth'));
 import NotFound from "./pages/NotFound";
 import VoiceMode from "./pages/VoiceMode";
 import FlowDemo from "./pages/FlowDemo";
+import Pulse from "./pages/Pulse";
+import PulseArticle from "./pages/PulseArticle";
 
 const queryClient = new QueryClient();
 
@@ -102,6 +104,8 @@ const App = () => {
             <Route path="/flow-demo" element={<RequireAuth><FlowDemo /></RequireAuth>} />
             <Route element={<RequireAuth><RequireProfile><AppShell /></RequireProfile></RequireAuth>}>
               <Route path="/" element={<Index />} />
+              <Route path="/pulse" element={<Pulse />} />
+              <Route path="/pulse/:id" element={<PulseArticle />} />
               <Route path="/chat/:chatId" element={<Index />} />
               <Route path="*" element={<NotFound />} />
             </Route>

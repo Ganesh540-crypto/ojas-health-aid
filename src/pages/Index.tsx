@@ -1,6 +1,6 @@
 import { useEffect } from "react";
 import { useLocation, useNavigate, useParams } from "react-router-dom";
-import ChatContainer from "@/components/Chat/ChatContainer";
+import ChatContainer from "@/features/chat/components/ChatContainer/ChatContainer";
 import { chatStore } from "@/lib/chatStore";
 import { auth, db } from "@/lib/firebase";
 import { ref, get, child } from 'firebase/database';
@@ -48,7 +48,15 @@ const Index = () => {
     })();
   }, [location.pathname, navigate]);
 
-  return <ChatContainer />;
+  return (
+    <>
+      {/* React 19: Native document metadata */}
+      <title>{chatId ? 'Chat' : 'Home'} | Ojas AI</title>
+      <meta name="description" content="Your intelligent AI assistant for health, productivity, and daily tasks. Chat with Ojas AI." />
+      
+      <ChatContainer />
+    </>
+  );
 };
 
 export default Index;

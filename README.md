@@ -53,34 +53,32 @@ Ojas aims to be India‑aware, sensitive to context, and consistent in tone. It 
 We take privacy seriously. Ojas is designed so you remain in control of your conversations.
 
 - Your chats are saved to your account so you can continue where you left off.
-- We use secure connections and reputable cloud infrastructure.
 - We don’t sell your personal conversation data.
 - You can manage your chat history from within the app.
 
 Note: Please avoid sharing highly sensitive personal details unless necessary. Ojas is not intended to store protected health information for clinical use.
 
-## Current status and roadmap
+## Ojas Pulse — Comprehensive Health News
 
-Ojas is in active development and pre‑launch. We’re focused on:
+**Ojas Pulse** is our intelligent health news aggregation and synthesis system that generates 1000+ comprehensive, multi-source health articles daily.
 
-- Improving accuracy and clarity for common health questions.
-- Enhancing Indian context and practical, real‑world tips.
-- Better personalization through short, optional intake questions for health topics.
-- Continued improvements to transparency with helpful source previews.
+### How Pulse Works
 
-Planned next steps:
+Unlike traditional news aggregators that simply collect existing articles, Pulse uses an advanced AI-driven approach:
 
-- Multi‑language support.
-- Optional voice read‑outs of answers.
-- Gentle reminders and checklists for daily habits.
-- Caregiver mode for families.
-- Simple pathways to consult professionals when needed.
+1. **Query Generation**: Automatically generates 1000+ diverse health-related queries covering all major categories (mental health, fitness, nutrition, chronic diseases, preventive care, etc.)
 
-## Frequently asked questions (FAQ)
+2. **Multi-Source Research**: For each query, Pulse searches the web and gathers insights from 5-15 authoritative sources
 
-1) Is Ojas a doctor?
+3. **AI Synthesis**: Using Gemini 2.5 Flash, Pulse synthesizes information from multiple sources into comprehensive, well-structured articles with:
+   - Engaging headlines
+   - 200-300 word multi-paragraph summaries
+   - 5-7 key insights
+   - Proper categorization and tagging
+   - Source citations
+   - Urgency and location relevance assessment
 
-No. Ojas provides general health information and practical guidance. It does not diagnose, treat, or prescribe. Always consult a qualified professional for medical advice.
+4. **Quality & Freshness**: Articles are comprehensive, current, and provide multiple perspectives on health topics — similar to how Perplexity synthesizes information
 
 2) How current is the information?
 

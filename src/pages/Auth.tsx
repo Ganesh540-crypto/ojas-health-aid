@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Label } from '@/components/ui/label';
@@ -55,7 +55,8 @@ export default function Auth({ initialMode }: { initialMode?: Mode }) {
   const desc = mode === 'signup' ? 'Join Ojas and start chatting.' : 'Sign in to continue your chats.';
   const submitLabel = mode === 'signup' ? (loading ? 'Creating…' : 'Create account') : (loading ? 'Signing in…' : 'Sign In');
 
-  const info = useMemo(() => (
+  // React 19: No useMemo needed - React Compiler optimizes automatically
+  const info = (
     <div className="space-y-6">
       <div className="flex items-center gap-2">
         <img src="/logo-jas.svg" alt="Ojas logo" className="h-8 w-8" />
@@ -79,7 +80,7 @@ export default function Auth({ initialMode }: { initialMode?: Mode }) {
         </>
       )}
     </div>
-  ), [mode]);
+  );
 
   return (
     <div className="relative min-h-screen grid grid-cols-1 md:grid-cols-2 bg-background">

@@ -364,4 +364,12 @@
   .cursor-ojas-close { cursor: var(--oj-cursor-close) 10 10, pointer; }
   .cursor-ojas-wait { cursor: var(--oj-cursor-hourglass) 10 10, progress; }
 
+  /* Focus styling overrides: remove focus outline/ring on clickable controls (keep inputs/textareas) */
+  :where(button, a, [role="button"], input[type="button"], input[type="submit"], input[type="reset"], select, summary):focus,
+  :where(button, a, [role="button"], input[type="button"], input[type="submit"], input[type="reset"], select, summary):focus-visible {
+    outline: none !important;
+    box-shadow: none !important;
+    --tw-ring-offset-shadow: 0 0 #0000 !important;
+    --tw-ring-shadow: 0 0 #0000 !important;
+  }
 }

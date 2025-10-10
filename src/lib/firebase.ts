@@ -2,6 +2,7 @@ import { initializeApp } from 'firebase/app';
 import { getAuth, GoogleAuthProvider } from 'firebase/auth';
 import { getDatabase } from 'firebase/database';
 import { getStorage } from 'firebase/storage';
+import { getFirestore } from 'firebase/firestore';
 
 const firebaseConfig = {
   apiKey: import.meta.env.VITE_FIREBASE_API_KEY as string,
@@ -22,3 +23,4 @@ if (!firebaseConfig.databaseURL) {
 }
 export const db = getDatabase(firebaseApp);
 export const storage = getStorage(firebaseApp);
+export const firestore = getFirestore(firebaseApp);

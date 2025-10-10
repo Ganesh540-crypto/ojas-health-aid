@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -50,9 +50,8 @@ const SettingsDialog: React.FC<Props> = ({ open, onOpenChange }) => {
     setProfile(profileStore.get() || {});
   }, [open]);
 
-  const languages = useMemo(() => {
-    return [DEFAULT_LANGUAGE, ...INDIAN_LANGUAGES, ...GLOBAL_LANGUAGES].filter((v, i, a) => a.findIndex(x => x.code === v.code) === i);
-  }, []);
+  // React 19: No useMemo needed - React Compiler optimizes
+  const languages = [DEFAULT_LANGUAGE, ...INDIAN_LANGUAGES, ...GLOBAL_LANGUAGES].filter((v, i, a) => a.findIndex(x => x.code === v.code) === i);
 
   const displayName = profile.name || (auth.currentUser?.displayName ?? auth.currentUser?.email?.split('@')[0] ?? '');
   const email = auth.currentUser?.email || '';
