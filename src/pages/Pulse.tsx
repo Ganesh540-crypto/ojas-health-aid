@@ -1,21 +1,27 @@
 import React, { useEffect, useRef, useState } from "react";
 import { collection, getDocs, limit, orderBy, query, startAfter, where, DocumentSnapshot } from "firebase/firestore";
 import { firestore } from "@/lib/firebase";
-import { Loader2 } from "lucide-react";
 import PulseCard from "@/components/Pulse/PulseCard";
-import PulseFilters from "@/components/Pulse/PulseFilters";
+import { WeatherWidget } from "@/components/Pulse/WeatherWidget";
 import { useNavigate } from "react-router-dom";
 import { languageStore } from "@/lib/languageStore";
-import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem } from "@/components/ui/dropdown-menu";
-import { Button } from "@/components/ui/button";
-import { GLOBAL_LANGUAGES, INDIAN_LANGUAGES } from "@/lib/languages";
+import { LanguageSelector } from "@/components/ui/language-selector";
+import { usePulseTranslations } from "@/hooks/usePulseTranslations";
+import { getPulseCache, isPulseCacheFresh, setPulseCache } from "@/lib/pulseCache";
 export interface PulseArticle {
   id: string;
   title: string;
   summary: string;
+  
+  // New structured format (from autonomous synthesis)
+  introduction?: string;
+  sections?: Array<{ heading: string; content: string }>;
+  
+  // Legacy format (backward compatibility)
   sentences?: string[];
   lede?: string;
   paragraphs?: string[];
+  
   keyPoints?: string[];
   tags: string[];
   source: string;
@@ -33,34 +39,81 @@ export interface PulseArticle {
 const PAGE_SIZE = 20;
 
 const Pulse: React.FC = () => {
-  const [loading, setLoading] = useState(true);
+  const cache = getPulseCache();
+  const fresh = isPulseCacheFresh(cache);
+  // Only show loader if we don't have any cached articles
+  const [initialLoading, setInitialLoading] = useState(!cache || cache.articles.length === 0);
+  const [filterLoading, setFilterLoading] = useState(false); // True when filtering by category
   const [loadingMore, setLoadingMore] = useState(false);
   const [hasMore, setHasMore] = useState(true);
-  const [articles, setArticles] = useState<PulseArticle[]>([]);
+  const [articles, setArticles] = useState<PulseArticle[]>(() => cache?.articles || []);
   const [lastDoc, setLastDoc] = useState<DocumentSnapshot | null>(null);
   const [selectedTags, setSelectedTags] = useState<string[]>([]);
-  const [availableTags, setAvailableTags] = useState<string[]>([]);
+  const [availableTags, setAvailableTags] = useState<string[]>(() => cache?.tags || []);
+  const [allTagsFromInitialLoad, setAllTagsFromInitialLoad] = useState<string[]>(() => cache?.tags || []);
   const navigate = useNavigate();
-  const lang = languageStore.get();
-  const [langCode, setLangCode] = React.useState(lang.code);
-
-  React.useEffect(() => {
-    const unsub = languageStore.subscribe((l) => setLangCode(l.code));
-    return () => unsub();
-  }, []);
+  const { translatedArticles } = usePulseTranslations(articles);
 
   const loadMoreRef = useRef<HTMLDivElement | null>(null);
   const observerRef = useRef<IntersectionObserver | null>(null);
 
+  // Initial load: fetch and store all available tags (skip if cache already has them)
   useEffect(() => {
-    fetchArticles(true);
+    if (availableTags.length > 0) return;
+    const fetchInitialTags = async () => {
+      try {
+        const col = collection(firestore, "pulse_articles");
+        const q = query(col, orderBy("publishedAt", "desc"), limit(50));
+        const snap = await getDocs(q);
+        const tagSet = new Set<string>();
+        snap.docs.forEach((d) => {
+          const data = d.data() as any;
+          (data.tags || []).forEach((t: string) => tagSet.add(t));
+        });
+        const sortedTags = Array.from(tagSet).sort();
+        setAllTagsFromInitialLoad(sortedTags);
+        setAvailableTags(sortedTags);
+      } catch (e) {
+        console.error("Failed to fetch tags", e);
+      }
+    };
+    fetchInitialTags();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Initial load on mount (skip fetch if we already have articles from cache)
+  useEffect(() => {
+    // If we already have cached articles, immediately hide loader and skip fetch
+    if (articles.length > 0) {
+      setInitialLoading(false);
+      return;
+    }
+    
+    // Otherwise fetch
+    fetchArticles(true, true); // isInitial=true, isFirstLoad=true
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Refetch when category changes (but not on the first mount)
+  const didMountRef = useRef(false);
+  useEffect(() => {
+    if (!didMountRef.current) {
+      didMountRef.current = true;
+      return; // skip first run to avoid flicker when we already have cache
+    }
+    fetchArticles(true, false); // isInitial=true, isFirstLoad=false
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedTags.join(",")]);
 
-  const fetchArticles = async (isInitial = false) => {
+  const fetchArticles = async (isInitial = false, isFirstLoad = false) => {
     if (isInitial) {
-      setLoading(true);
-      setArticles([]);
+      if (isFirstLoad) {
+        // Only show the large loader if we don't already have cached articles
+        setInitialLoading(articles.length === 0);
+      } else {
+        setFilterLoading(true); // Category filter - don't show full loading screen
+      }
+      setArticles(isFirstLoad ? articles : []);
       setLastDoc(null);
       setHasMore(true);
     } else {
@@ -70,15 +123,10 @@ const Pulse: React.FC = () => {
     try {
       const col = collection(firestore, "pulse_articles");
       
-      // Build query: if filtering by tags, use array-contains-any (up to 10 tags); otherwise simple orderBy
-      let q;
-      if (selectedTags.length > 0) {
-        // Firestore array-contains-any supports max 10 values
-        const tagsToQuery = selectedTags.slice(0, 10);
-        q = query(col, where("tags", "array-contains-any", tagsToQuery), orderBy("publishedAt", "desc"), limit(PAGE_SIZE));
-      } else {
-        q = query(col, orderBy("publishedAt", "desc"), limit(PAGE_SIZE));
-      }
+      // Always fetch all articles ordered by date (no array-contains-any to avoid index requirement)
+      // We'll filter client-side if tags are selected
+      const fetchLimit = selectedTags.length > 0 ? PAGE_SIZE * 3 : PAGE_SIZE; // Fetch more if filtering
+      let q = query(col, orderBy("publishedAt", "desc"), limit(fetchLimit));
       
       if (lastDoc && !isInitial) {
         q = query(q, startAfter(lastDoc));
@@ -87,28 +135,65 @@ const Pulse: React.FC = () => {
       const snap = await getDocs(q);
       if (snap.empty) {
         setHasMore(false);
-        if (isInitial) setArticles([]);
+        if (isInitial) {
+          setArticles([]);
+        }
         return;
       }
 
-      const newItems: PulseArticle[] = snap.docs.map((d) => ({ id: d.id, ...(d.data() as any) }));
-      setArticles((prev) => (isInitial ? newItems : [...prev, ...newItems]));
-      setLastDoc(snap.docs[snap.docs.length - 1]);
-      setHasMore(snap.docs.length === PAGE_SIZE);
-      // Update available tags dynamically from loaded items
-      const tagSet = new Set<string>(isInitial ? [] : availableTags);
-      for (const a of newItems) {
-        (a.tags || []).forEach(t => tagSet.add(t));
+      let newItems: PulseArticle[] = snap.docs.map((d) => ({ id: d.id, ...(d.data() as any) }));
+      
+      // Client-side filtering by tags if needed
+      if (selectedTags.length > 0) {
+        newItems = newItems.filter((article) => 
+          article.tags && article.tags.some((tag) => selectedTags.includes(tag))
+        );
+        console.log(`Filtered ${newItems.length} articles matching tags:`, selectedTags);
       }
-      setAvailableTags(Array.from(tagSet));
+      
+      // Debug: Log first article's tags to see format
+      if (newItems.length > 0 && isInitial) {
+        console.log('Sample article tags:', newItems[0].tags);
+        console.log('Available tags in sidebar:', allTagsFromInitialLoad.slice(0, 5));
+      }
+      
+      if (isInitial) {
+        // Replace articles completely on initial load or filter change
+        setArticles(newItems);
+        // Update cache
+        try {
+          const tagSet = new Set<string>();
+          newItems.forEach(a => (a.tags || []).forEach(t => tagSet.add(t)));
+          const tags = Array.from(tagSet).sort();
+          setPulseCache({ articles: newItems, tags, fetchedAt: Date.now() });
+          if (tags.length) {
+            setAvailableTags(tags);
+            setAllTagsFromInitialLoad(tags);
+          }
+        } catch {}
+      } else {
+        // Append for infinite scroll (avoid duplicates)
+        setArticles((prev) => {
+          const existingIds = new Set(prev.map(a => a.id));
+          const uniqueNew = newItems.filter(item => !existingIds.has(item.id));
+          const updated = [...prev, ...uniqueNew];
+          try {
+            const tagSet = new Set<string>();
+            updated.forEach(a => (a.tags || []).forEach(t => tagSet.add(t)));
+            const tags = Array.from(tagSet).sort();
+            setPulseCache({ articles: updated, tags, fetchedAt: Date.now() });
+          } catch {}
+          return updated;
+        });
+      }
+      
+      setLastDoc(snap.docs[snap.docs.length - 1]);
+      setHasMore(snap.docs.length === fetchLimit);
     } catch (e: any) {
       console.error("Pulse fetch error", e);
-      // If Firestore index missing, show helpful message
-      if (e?.code === 'failed-precondition' || e?.message?.includes('index')) {
-        console.warn('Firestore index required. Create index for collection: pulse_articles, fields: tags (array-contains-any), publishedAt (desc)');
-      }
     } finally {
-      setLoading(false);
+      setInitialLoading(false);
+      setFilterLoading(false);
       setLoadingMore(false);
     }
   };
@@ -120,10 +205,15 @@ const Pulse: React.FC = () => {
     observerRef.current = new IntersectionObserver(
       (entries) => {
         if (entries[0]?.isIntersecting && hasMore && !loadingMore) {
-          fetchArticles(false);
+          // Add small delay for bounce effect
+          setTimeout(() => {
+            if (hasMore && !loadingMore) {
+              fetchArticles(false);
+            }
+          }, 300);
         }
       },
-      { threshold: 0.6 }
+      { threshold: 0.8, rootMargin: '100px' }
     );
 
     observerRef.current.observe(loadMoreRef.current);
@@ -131,17 +221,17 @@ const Pulse: React.FC = () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [loadMoreRef.current, hasMore, loadingMore, lastDoc]);
 
-  // React 19: No useMemo needed - React Compiler optimizes automatically
-  const hero = articles[0];
-  const rest = articles.slice(1);
-  const arr = Array.isArray(hero?.sources) && hero.sources!.length > 0 ? hero!.sources! : (hero?.source ? [hero.source] : []);
-  const heroDomains = Array.from(new Set(arr.filter(Boolean))).slice(0, 6);
-  const faviconUrl = (domain?: string) => domain ? `https://www.google.com/s2/favicons?sz=32&domain=${encodeURIComponent(domain)}` : undefined;
-
-  if (loading) {
+  // Only show full loading screen on initial mount when there's truly no data yet
+  if (initialLoading && articles.length === 0) {
     return (
-      <div className="flex items-center justify-center min-h-[60vh]">
-        <Loader2 className="h-6 w-6 animate-spin text-primary" />
+      <div className="flex items-center justify-center min-h-screen">
+        <div className="oj-loader" aria-label="Loading" role="status" />
+        <style>{`
+          .oj-loader{width:60px;display:flex;align-items:flex-start;aspect-ratio:1}
+          .oj-loader:before,.oj-loader:after{content:"";flex:1;aspect-ratio:1;--g:conic-gradient(from -90deg at 10px 10px,hsl(var(--primary)) 90deg,#0000 0);background:var(--g),var(--g),var(--g);filter:drop-shadow(30px 30px 0 hsl(var(--primary)));animation:l20 1s infinite}
+          .oj-loader:after{transform:scaleX(-1)}
+          @keyframes l20{0%{background-position:0 0,10px 10px,20px 20px}33%{background-position:10px 10px}66%{background-position:0 20px,10px 10px,20px 0}100%{background-position:0 0,10px 10px,20px 20px}}
+        `}</style>
       </div>
     );
   }
@@ -152,87 +242,146 @@ const Pulse: React.FC = () => {
       <title>Pulse - Latest Health & Tech News | Ojas</title>
       <meta name="description" content="Stay updated with the latest health, technology, science, and business news. Autonomous AI-powered news discovery with comprehensive articles." />
       
-      <div className="min-h-screen bg-background">
-      {/* Header */}
-      <div className="sticky top-0 z-10 bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60 border-b">
-        <div className="max-w-4xl mx-auto px-4 py-4 flex items-center justify-between gap-4">
-          <div>
-            <h1 className="text-2xl font-bold">Ojas Pulse</h1>
-            <p className="text-sm text-muted-foreground mt-1">Trusted health news, personalized for you</p>
-          </div>
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <Button
-                type="button"
-                variant="secondary"
-                size="icon"
-                className="h-10 w-10 rounded-full font-semibold shadow-md border border-border bg-background hover:bg-muted"
-                aria-label={`Change language`}
-              >
-                {([...GLOBAL_LANGUAGES, ...INDIAN_LANGUAGES].find(l => l.code === langCode)?.label || 'EN').charAt(0)}
-              </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end" className="w-64 max-h-56 overflow-y-auto bg-background">
-              {[...GLOBAL_LANGUAGES, ...INDIAN_LANGUAGES].filter((l, i, arr) => arr.findIndex(x => x.code === l.code) === i).map((l) => (
-                <DropdownMenuItem key={l.code} onClick={() => languageStore.set(l.code)}>
-                  <span className="mr-2 w-4 inline-block text-primary">{langCode === l.code ? '✓' : ''}</span>
-                  <span>{l.label}</span>
-                </DropdownMenuItem>
-              ))}
-            </DropdownMenuContent>
-          </DropdownMenu>
+      <div className="flex flex-col h-screen bg-background">
+      {/* Header - Minimal */}
+      <div className="sticky top-0 z-50 bg-background border-b">
+        <div className="pl-4 py-2">
+          <h1 className="text-base font-normal text-muted-foreground">Ojas Pulse</h1>
         </div>
       </div>
 
-      {/* Hero + Side rail */}
-      {hero && (
-        <div className="max-w-4xl mx-auto px-4 pt-6">
-          <div className="rounded-2xl border bg-card p-6 shadow-sm cursor-pointer" onClick={() => navigate(`/pulse/${hero.id}`)}>
-            <div className="text-xs text-muted-foreground mb-2">Popular Story</div>
-            <h2 className="text-2xl md:text-3xl font-semibold leading-tight mb-3">{hero.title}</h2>
-            <p className="text-muted-foreground mb-4 leading-relaxed line-clamp-4">{hero.summary}</p>
-            <div className="flex items-center justify-between">
-              <a href={hero.url} target="_blank" rel="noopener noreferrer" className="text-primary font-medium hover:underline" onClick={(e)=> e.stopPropagation()}>
-                Read original
-              </a>
-              <div className="text-xs text-muted-foreground inline-flex items-center gap-2">
-                <span className="flex -space-x-1">
-                  {heroDomains.map((d, i) => (
-                    <img key={`${d}-${i}`} src={faviconUrl(d)} alt={d} className="h-4 w-4 rounded ring-1 ring-white dark:ring-gray-900" />
-                  ))}
-                </span>
-                <span>{Array.isArray(hero.sources) && hero.sources.length ? `${hero.sources.length} sources` : (hero.source || '')}</span>
+      {/* Scrollable Content Area */}
+      <div className="flex-1 overflow-y-auto">
+        {/* Language Selector */}
+        <LanguageSelector />
+
+        {/* Main Content with Sidebar */}
+        <div className="max-w-7xl mx-auto px-6 pt-8 pb-10">
+        <div className="flex gap-8">
+          {/* Left: Articles */}
+          <div className="flex-1 min-w-0">
+            {/* All articles in alternating layout */}
+            {filterLoading ? (
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                {/* Skeleton loading cards */}
+                {[1, 2, 3, 4, 5, 6].map((i) => (
+                  <div key={i} className="rounded-lg border bg-card p-4 animate-pulse">
+                    <div className="h-4 bg-muted rounded w-3/4 mb-3"></div>
+                    <div className="h-3 bg-muted rounded w-full mb-2"></div>
+                    <div className="h-3 bg-muted rounded w-5/6"></div>
+                  </div>
+                ))}
+              </div>
+            ) : articles.length === 0 && !initialLoading ? (
+              <div className="text-center py-12">
+                <p className="text-muted-foreground mb-2">No articles found</p>
+                {selectedTags.length > 0 && (
+                  <button
+                    onClick={() => setSelectedTags([])}
+                    className="text-sm text-primary hover:underline"
+                  >
+                    Clear filters
+                  </button>
+                )}
+              </div>
+            ) : (
+              <div className="flex flex-col gap-6">
+                {(() => {
+                  const elements: JSX.Element[] = [];
+                  let i = 0;
+                  let largeCardCount = 0;
+                  
+                  while (i < articles.length) {
+                    // Add large card
+                    if (i < articles.length) {
+                      const imagePosition = largeCardCount % 2 === 0 ? 'right' : 'left';
+                      elements.push(
+                        <PulseCard 
+                          key={articles[i].id} 
+                          article={articles[i]} 
+                          translated={translatedArticles[articles[i].id]}
+                          size="large"
+                          imagePosition={imagePosition}
+                          index={i}
+                        />
+                      );
+                      i++;
+                      largeCardCount++;
+                    }
+                    
+                    // Add row of 3 small cards
+                    const smallCardsInRow = articles.slice(i, i + 3);
+                    if (smallCardsInRow.length > 0) {
+                      elements.push(
+                        <div key={`small-row-${i}`} className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                          {smallCardsInRow.map((a, localIndex) => (
+                            <PulseCard 
+                              key={a.id} 
+                              article={a} 
+                              translated={translatedArticles[a.id]}
+                              size="small"
+                              index={i + localIndex}
+                            />
+                          ))}
+                        </div>
+                      );
+                      i += 3;
+                    }
+                  }
+                  
+                  return elements;
+                })()}
+              </div>
+            )}
+          </div>
+
+          {/* Right: Sidebar */}
+          <div className="hidden lg:block w-80 flex-shrink-0 space-y-4">
+            {/* Category Filters */}
+            <div className="bg-card border rounded-lg p-4">
+              <h3 className="text-sm font-medium mb-3">Customize your feed</h3>
+              <div className="flex flex-wrap gap-2">
+                {initialLoading ? (
+                  <div className="text-xs text-muted-foreground">Loading categories...</div>
+                ) : availableTags.length > 0 ? (
+                  availableTags.slice(0, 10).map((tag) => (
+                    <button
+                      key={tag}
+                      onClick={() => {
+                        if (selectedTags.includes(tag)) {
+                          setSelectedTags(selectedTags.filter((t) => t !== tag));
+                        } else {
+                          setSelectedTags([...selectedTags, tag]);
+                        }
+                      }}
+                      className={`px-3 py-1.5 rounded-full text-xs transition-colors ${
+                        selectedTags.includes(tag)
+                          ? 'bg-primary text-white'
+                          : 'bg-muted hover:bg-muted/80'
+                      }`}
+                    >
+                      {tag.replace(/-/g, ' ')}
+                    </button>
+                  ))
+                ) : (
+                  <div className="text-xs text-muted-foreground">No categories available</div>
+                )}
               </div>
             </div>
-          </div>
-          {/* Side rail top picks */}
-          <div className="mt-4 grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
-            {rest.slice(0, 3).map((a) => (
-              <PulseCard key={a.id} article={a} />
-            ))}
+
+            {/* Weather Widget */}
+            <WeatherWidget />
           </div>
         </div>
-      )}
 
-      {/* Filters */}
-      <div className="max-w-4xl mx-auto px-4 py-4">
-        <PulseFilters selectedTags={selectedTags} onTagsChange={setSelectedTags} tags={availableTags} />
+        {/* Load more trigger - Hidden */}
+        <div ref={loadMoreRef} className="py-8 flex justify-center">
+          {!hasMore && articles.length > 0 && (
+            <p className="text-sm text-muted-foreground">You're all caught up! ✨</p>
+          )}
+        </div>
       </div>
-
-      {/* Feed */}
-      <div className="max-w-4xl mx-auto px-4 pb-10 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-        {rest.slice(3).map((a) => (
-          <PulseCard key={a.id} article={a} />
-        ))}
-      </div>
-
-      {/* Load more trigger */}
-      <div ref={loadMoreRef} className="py-8 flex justify-center">
-        {loadingMore && <Loader2 className="h-5 w-5 animate-spin text-primary" />}
-        {!hasMore && articles.length > 0 && (
-          <p className="text-sm text-muted-foreground">You're up to date.</p>
-        )}
-      </div>
+    </div>
     </div>
     </>
   );

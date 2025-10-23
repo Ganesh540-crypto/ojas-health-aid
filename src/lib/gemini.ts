@@ -2,6 +2,8 @@ import { GoogleGenAI } from '@google/genai';
 import { detectTone, isHealthRelated } from './textAnalysis';
 import { OJAS_HEALTH_SYSTEM } from './systemPrompts';
 import { languageStore } from './languageStore';
+import { memoryStore } from './memory';
+// Function-calling removed: no function tools are offered or executed
 
 // Using Gemini built-in Google Search; legacy googleSearch service removed
 
@@ -17,6 +19,144 @@ export class GeminiService {
   constructor() {
     if (!API_KEY) console.warn('Gemini API key missing: set VITE_GEMINI_API_KEY in your .env file');
     this.ai = new GoogleGenAI({ apiKey: API_KEY });
+  }
+
+  // Encourage paragraph-first style and inline citations for health responses (light-touch note)
+  private enforceHealthStyleNote(): string {
+    return `\n\nSTYLE NOTE (Health):\n- Prefer paragraph-style explanations; use lists only for short checklists or steps.\n- CRITICAL: Add inline citations [1], [2], [3] RIGHT AFTER each sentence that uses web data (guidelines, stats, treatments).\n- Example: "Recent guidelines recommend 150 minutes of weekly exercise. [1] This reduces cardiovascular risk significantly. [2]"\n- Cite as you write facts throughout the response, NOT bunched at the end.\n- NO "References:" section - inline citations only.`;
+  }
+
+  // Inject inline citations [n] based on grounding segment data (like Perplexity/Pulse)
+  // Groups citations by sentence to show as "Source +N" instead of separate badges
+  private injectCitations(text: string, groundingMetadata: any): string {
+    if (!groundingMetadata?.groundingSupports || !text) return text;
+    
+    try {
+      // Build map of chunk index to citation number
+      const chunkToCitation = new Map<number, number>();
+      const processedChunks = new Set<number>();
+      let citationNum = 1;
+      
+      // Collect all segments with their positions and chunk indices
+      const segments: Array<{ start: number; end: number; chunkIndices: number[] }> = [];
+      for (const support of groundingMetadata.groundingSupports) {
+        if (support?.segment?.startIndex !== undefined && support?.segment?.endIndex !== undefined && support?.groundingChunkIndices) {
+          segments.push({
+            start: support.segment.startIndex,
+            end: support.segment.endIndex,
+            chunkIndices: support.groundingChunkIndices
+          });
+        }
+      }
+      
+      // Sort segments by end position
+      segments.sort((a, b) => a.end - b.end);
+      
+      // Assign citation numbers to chunks in order of appearance
+      for (const seg of segments) {
+        for (const chunkIdx of seg.chunkIndices) {
+          if (!processedChunks.has(chunkIdx)) {
+            chunkToCitation.set(chunkIdx, citationNum++);
+            processedChunks.add(chunkIdx);
+          }
+        }
+      }
+      
+      // Find PARAGRAPH boundaries - citations should only appear at paragraph/section ends, not every sentence
+      const paragraphEnds: number[] = [];
+      const lines = text.split('\n');
+      let currentPos = 0;
+      
+      for (let i = 0; i < lines.length; i++) {
+        const line = lines[i];
+        const lineEnd = currentPos + line.length;
+        const nextLine = i < lines.length - 1 ? lines[i + 1] : '';
+        
+        const isLastLine = i === lines.length - 1;
+        const nextIsEmpty = !nextLine.trim();
+        const nextIsHeading = /^#{1,6}\s/.test(nextLine) || /^\d+\.\s/.test(nextLine) || /^\*\*\d+\./.test(nextLine);
+        
+        if (line.trim() && (isLastLine || nextIsEmpty || nextIsHeading)) {
+          const sentenceMatches = line.match(/[.!?](?:\s|$)/g);
+          if (sentenceMatches && sentenceMatches.length > 0) {
+            const lastSentencePos = line.lastIndexOf(sentenceMatches[sentenceMatches.length - 1]);
+            if (lastSentencePos !== -1) {
+              paragraphEnds.push(currentPos + lastSentencePos + 1);
+            }
+          }
+        }
+        
+        currentPos = lineEnd + 1;
+      }
+      
+      if (paragraphEnds.length === 0 || paragraphEnds[paragraphEnds.length - 1] !== text.length) {
+        paragraphEnds.push(text.length);
+      }
+      
+      // Group segments by paragraph (find which paragraph each segment belongs to)
+      const paragraphCitations = new Map<number, Set<number>>();
+      for (const seg of segments) {
+        const paragraphIdx = paragraphEnds.findIndex(endPos => seg.end <= endPos);
+        if (paragraphIdx === -1) continue;
+        
+        const paragraphEnd = paragraphEnds[paragraphIdx];
+        if (!paragraphCitations.has(paragraphEnd)) {
+          paragraphCitations.set(paragraphEnd, new Set());
+        }
+        
+        for (const chunkIdx of seg.chunkIndices) {
+          const citNum = chunkToCitation.get(chunkIdx);
+          if (citNum) paragraphCitations.get(paragraphEnd)!.add(citNum);
+        }
+      }
+      
+      // Detect heading lines (markdown ## or numbered 1. 2. 3.) to skip citations in headings
+      const headingRanges: Array<{ start: number; end: number }> = [];
+      const lines2 = text.split('\n');
+      let currentPos2 = 0;
+      for (const line of lines2) {
+        const lineEnd = currentPos2 + line.length;
+        if (/^#{1,6}\s/.test(line) || /^\d+\.\s/.test(line)) {
+          headingRanges.push({ start: currentPos2, end: lineEnd });
+        }
+        currentPos2 = lineEnd + 1;
+      }
+      
+      // Helper to check if position is within a heading
+      const isInHeading = (pos: number) => {
+        return headingRanges.some(range => pos >= range.start && pos <= range.end);
+      };
+      
+      // Now inject grouped citations at paragraph ends (working backwards), but skip headings
+      const sortedParagraphEnds = Array.from(paragraphCitations.keys()).sort((a, b) => b - a);
+      let result = text;
+      
+      for (const paragraphEnd of sortedParagraphEnds) {
+        if (isInHeading(paragraphEnd)) {
+          console.log('⏭️ [Health] Skipping citation in heading at position', paragraphEnd);
+          continue;
+        }
+        
+        const citations = Array.from(paragraphCitations.get(paragraphEnd)!).sort((a, b) => a - b);
+        if (citations.length === 0) continue;
+        
+        const citationText = citations.map(n => `[${n}]`).join('');
+        
+        let insertPos = paragraphEnd;
+        if (insertPos > result.length) insertPos = result.length;
+        
+        const before = result.substring(0, insertPos);
+        const after = result.substring(insertPos);
+        const needsSpace = before.length > 0 && !/\s$/.test(before);
+        result = before + (needsSpace ? ' ' : '') + citationText + (after && !/^\s/.test(after) ? ' ' : '') + after;
+      }
+      
+      console.log('📌 [Health] Injected', processedChunks.size, 'citations grouped into', paragraphCitations.size, 'paragraphs');
+      return result;
+    } catch (err) {
+      console.warn('⚠️ [Health] Citation injection failed:', err);
+      return text;
+    }
   }
 
   // Lightweight retry helper for transient API failures (e.g., 503)
@@ -251,6 +391,7 @@ export class GeminiService {
       forceSearch?: boolean;
       thinkingBudget?: number;
       files?: File[];
+      memoryContext?: string;
     }
   ): Promise<{ content: string; isHealthRelated: boolean; sources?: Array<{ title: string; url: string; snippet?: string; displayUrl?: string }> }> {
     const isHealth = this.isHealthRelated(message);
@@ -281,8 +422,13 @@ export class GeminiService {
       const code = lang.code;
       return `\nCRITICAL LANGUAGE INSTRUCTION: The user selected ${target} (${code}).\nRespond ENTIRELY in ${target}. Do not switch languages mid-answer.\nNever default to Hindi. If ${code}==='en', use natural English.`;
     })();
+    
+    // Inject user memory context (like ChatGPT/Gemini do)
+    const memoryContext = options?.memoryContext || '';
+    
+    const styleNote = this.enforceHealthStyleNote();
     const config: Record<string, any> = {
-      systemInstruction: `${OJAS_HEALTH_SYSTEM}\n\n${currentTime}${languageNote ? `\n\n${languageNote}` : ''}`,
+      systemInstruction: `${OJAS_HEALTH_SYSTEM}\n\n${currentTime}${languageNote ? `\n\n${languageNote}` : ''}${memoryContext}${styleNote}`,
       generationConfig: {
         temperature: 0.8,
         maxOutputTokens: 8192
@@ -294,9 +440,9 @@ export class GeminiService {
       config.thinkingConfig = { thinkingBudget: options.thinkingBudget };
     }
 
-    // Always enable Google Search tool for full model responses
-    config.tools = [{ googleSearch: {} }];
-
+    // Enable only Google Search for the main content request (avoid mixing with function calling)
+    const tools = [ { googleSearch: {} } ];
+    config.tools = tools;
     let full = '';
     let groundingMetadata: any = null;
 
@@ -330,9 +476,21 @@ export class GeminiService {
       }
 
       // Extract sources from grounding metadata
-      const sources = this.extractSources(groundingMetadata);
+      // Extract sources from streamed grounding metadata. If none, do a quick non-stream call to retrieve grounding.
+      let sources = this.extractSources(groundingMetadata);
+      if (!sources || sources.length === 0) {
+        try {
+          const nonStream = await this.withRetry(() => this.ai.models.generateContent({ model: this.model, config, contents }));
+          const cand2 = (nonStream as any)?.candidates?.[0];
+          const gm2 = (nonStream as any).groundingMetadata || cand2?.groundingMetadata;
+          const s2 = this.extractSources(gm2);
+          if (s2.length > 0) sources = s2;
+        } catch {}
+      }
 
-      const finalText = full || 'I could not generate a response this time.';
+      let finalText = full || 'I could not generate a response this time.';
+      // Inject inline citations based on grounding segments
+      finalText = this.injectCitations(finalText, groundingMetadata);
       this.addToMemory(message, finalText, isHealth);
       return { content: finalText, isHealthRelated: isHealth, sources: sources.length > 0 ? sources : undefined };
 
@@ -350,6 +508,9 @@ export class GeminiService {
       forceSearch?: boolean;
       thinkingBudget?: number;
       files?: File[];
+      chatId?: string;
+      messageId?: string;
+      memoryContext?: string;
     },
     onChunk?: (delta: string) => void,
     onEvent?: (evt: any) => void
@@ -377,8 +538,13 @@ export class GeminiService {
         const code = lang.code;
         return `\nCRITICAL LANGUAGE INSTRUCTION: The user selected ${target} (${code}).\nRespond ENTIRELY in ${target}. Do not switch languages mid-answer.\nNever default to Hindi. If ${code}==='en', use natural English.`;
       })();
+      
+      // Inject user memory context (like ChatGPT/Gemini do)
+      const memoryContext = options?.memoryContext || '';
+      
+      const styleNote = this.enforceHealthStyleNote();
       const config: Record<string, any> = {
-        systemInstruction: `${OJAS_HEALTH_SYSTEM}\n\n${this.getCurrentTimeContext()}${languageNote ? `\n\n${languageNote}` : ''}`,
+        systemInstruction: `${OJAS_HEALTH_SYSTEM}\n\n${this.getCurrentTimeContext()}${languageNote ? `\n\n${languageNote}` : ''}${memoryContext}${styleNote}`,
         generationConfig: { temperature: 0.8, maxOutputTokens: 8192 },
       };
       if (options?.thinkingBudget !== undefined) {
@@ -386,8 +552,22 @@ export class GeminiService {
       } else {
         (config as any).thinkingConfig = { thinkingBudget: -1, includeThoughts: true };
       }
-      if (options?.forceSearch || true) {
-        (config as any).tools = [{ googleSearch: {} }];
+      const urlPattern = /(?:https?:\/\/)?(?:www\.)?[a-z0-9-]+(?:\.[a-z0-9-]+)+(?:[\/?#][^\s]*)?/i;
+      const hasUrl = urlPattern.test(message);
+      const tools: any[] = [];
+      
+      // Add URL context tool if URL detected
+      if (hasUrl) tools.push({ urlContext: {} });
+      
+      // Always add Google Search for health queries
+      if (options?.forceSearch || true) tools.push({ googleSearch: {} });
+      
+      // NOTE: Function tools are disabled in health model; only search/url tools are used
+      
+      if (tools.length > 0) {
+        (config as any).tools = tools;
+        (config as any).generationConfig.responseSchema = undefined;
+        (config as any).generationConfig.candidateCount = 1;
       }
 
       let full = '';
@@ -417,16 +597,20 @@ export class GeminiService {
       };
       try {
         const response: any = await this.withRetry(() => this.ai.models.generateContentStream({ model: this.model, config, contents }) as any);
-        for await (const chunk of response) {
-          if (stopped) break;
-          if ((chunk as any).groundingMetadata) groundingMetadata = (chunk as any).groundingMetadata;
-          if ((chunk as any).candidates?.[0]?.groundingMetadata) groundingMetadata = (chunk as any).candidates[0].groundingMetadata;
-          emitEvents(chunk);
-          if (chunk.text) {
-            full += chunk.text;
-            onChunk?.(chunk.text);
+        const reader = (async () => {
+          for await (const chunk of response) {
+            if (stopped) break;
+            if ((chunk as any).groundingMetadata) groundingMetadata = (chunk as any).groundingMetadata;
+            if ((chunk as any).candidates?.[0]?.groundingMetadata) groundingMetadata = (chunk as any).candidates[0].groundingMetadata;
+            emitEvents(chunk);
+            if (chunk.text) {
+              full += chunk.text;
+              onChunk?.(chunk.text);
+            }
           }
-        }
+        })();
+        const timeout = new Promise<void>((_, reject) => setTimeout(() => reject(new Error('STREAM_TIMEOUT: health stream exceeded 25s')), 25000));
+        await Promise.race([reader, timeout]);
       } catch {
         try {
           const nonStream = await this.withRetry(() => this.ai.models.generateContent({ model: this.model, config, contents }));
@@ -439,8 +623,17 @@ export class GeminiService {
       }
 
       const sources = this.extractSources(groundingMetadata);
-      const finalText = full || 'I could not generate a response this time.';
+      const finalTextRaw = full || 'I could not generate a response this time.';
+      // Strip tool/function artifacts from final text
+      let finalText = finalTextRaw
+        .replace(/\[\[ESCALATE_HEALTH\]\][^\n]*/g, '')
+        .replace(/\[\[(function_call|tool_use)[:\s][^\]]*\]\]/gi, '')
+        .replace(/```(?:json)?\s*\[\[(function_call|tool_use)[\s\S]*?\]\]\s*```/gi, '')
+        .trim();
+      // Inject inline citations based on grounding segments
+      finalText = this.injectCitations(finalText, groundingMetadata);
       this.addToMemory(message, finalText, isHealth);
+      
       return { content: finalText, isHealthRelated: isHealth, sources: sources.length ? sources : undefined };
     })();
     return { stop: () => { stopped = true; }, finished };

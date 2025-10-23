@@ -13,24 +13,11 @@ const Index = () => {
 
   useEffect(() => {
     (async () => {
-      if (location.pathname === "/") {
+      if (location.pathname === "/" || location.pathname === "/app") {
         // Not logged in? Go to login.
         if (!auth.currentUser) {
           navigate('/login', { replace: true });
           return;
-        }
-  // If logged in and no profile in RTDB, send to onboarding (do not create chat)
-        const user = auth.currentUser;
-        if (user) {
-          try {
-            const snap = await get(child(ref(db), `users/${user.uid}/profile`));
-            if (!snap.exists()) {
-              navigate('/onboarding', { replace: true });
-              return;
-            }
-          } catch (e) {
-            console.warn('Profile check failed', e);
-          }
         }
         // Hydrate from cloud first if we have user and no cached chats yet.
         let list = chatStore.list();
@@ -47,6 +34,10 @@ const Index = () => {
       }
     })();
   }, [location.pathname, navigate]);
+
+  // Note: Fallback handling for a missing chatId is done inside ChatContainer.
+  // Keeping it in one place prevents double-redirects and URL loops when a new
+  // ephemeral chat (empty) isn't yet included in filtered chat lists.
 
   return (
     <>

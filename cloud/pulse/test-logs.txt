@@ -1,0 +1,169 @@
+LEVEL  NAME                 EXECUTION_ID  TIME_UTC                 LOG
+       autonomous-research  p5m49vn258kg  2025-10-13 13:13:31.961  [autonomousResearch] ERROR: Missing API keys!
+       autonomous-research  p5m49vn258kg  2025-10-13 13:13:31.961    GOOGLE_SEARCH_ENGINE_ID: MISSING
+       autonomous-research  p5m49vn258kg  2025-10-13 13:13:31.961    GOOGLE_SEARCH_API_KEY: MISSING
+       autonomous-research  p5m49vn258kg  2025-10-13 13:13:31.960    GEMINI_API_KEY: MISSING
+       autonomous-research  p5m49vn258kg  2025-10-13 13:13:31.960  [autonomousResearch] Environment check:
+       autonomous-research  p5m49vn258kg  2025-10-13 13:13:31.960  [autonomousResearch] Query params: {"category":"health","region":"IN","numQueries":"3"}
+       autonomous-research  p5m49vn258kg  2025-10-13 13:13:31.960  [autonomousResearch] Timestamp: 2025-10-13T13:13:31.946Z
+       autonomous-research  p5m49vn258kg  2025-10-13 13:13:31.946  [autonomousResearch] ===== REQUEST START =====
+       autonomous-research  p5m49vn258kg  2025-10-13 13:13:31.945  ========================================
+E      autonomous-research                2025-10-13 13:13:31.914
+I      autonomous-research                2025-10-13 13:10:08.768  Default STARTUP TCP probe succeeded after 1 attempt for container "worker" on port 8080.
+I      autonomous-research                2025-10-13 13:10:03.874  Starting new instance. Reason: DEPLOYMENT_ROLLOUT - Instance started due to traffic shifting between revisions due to deployment, traffic split adjustment, or deployment health check.
+       autonomous-research  p428usty47rm  2025-10-13 12:30:05.146  [autonomousResearch] Starting autonomous discovery...
+I      autonomous-research                2025-10-13 12:30:05.025  Default STARTUP TCP probe succeeded after 1 attempt for container "worker" on port 8080.
+I      autonomous-research                2025-10-13 12:30:01.933  Starting new instance. Reason: AUTOSCALING - Instance started due to configured scaling factors (e.g. CPU utilization, request throughput, etc.) or no existing capacity for current traffic.
+E      autonomous-research                2025-10-13 12:30:01.900
+       autonomous-research  p1x5z9jt310w  2025-10-13 11:30:08.907  [autonomousResearch] Starting autonomous discovery...
+I      autonomous-research                2025-10-13 11:30:08.877  Default STARTUP TCP probe succeeded after 1 attempt for container "worker" on port 8080.
+I      autonomous-research                2025-10-13 11:30:05.722  Starting new instance. Reason: AUTOSCALING - Instance started due to configured scaling factors (e.g. CPU utilization, request throughput, etc.) or no existing capacity for current traffic.
+E      autonomous-research                2025-10-13 11:30:05.691
+       autonomous-research  p0ufr19i38aj  2025-10-13 11:00:01.982  [autonomousResearch] Starting autonomous discovery...
+E      autonomous-research                2025-10-13 11:00:01.958
+       autonomous-research  p0q3z3z0vtwb  2025-10-13 10:56:40.103  [autonomousResearch] Starting autonomous discovery...
+E      autonomous-research                2025-10-13 10:56:40.049
+I      autonomous-research                2025-10-13 10:56:12.618  Default STARTUP TCP probe succeeded after 1 attempt for container "worker" on port 8080.
+I      autonomous-research                2025-10-13 10:56:08.168  Starting new instance. Reason: DEPLOYMENT_ROLLOUT - Instance started due to traffic shifting between revisions due to deployment, traffic split adjustment, or deployment health check.
+       autonomous-research  p08u33r89m7g  2025-10-13 10:43:14.133  [autonomousResearch] Starting autonomous discovery...
+E      autonomous-research                2025-10-13 10:43:14.103
+I      autonomous-research                2025-10-13 10:41:06.360  Default STARTUP TCP probe succeeded after 1 attempt for container "worker" on port 8080.
+I      autonomous-research                2025-10-13 10:41:01.494  Starting new instance. Reason: DEPLOYMENT_ROLLOUT - Instance started due to traffic shifting between revisions due to deployment, traffic split adjustment, or deployment health check.
+       autonomous-research  ozusap000ocx  2025-10-13 10:32:18.631  [autonomousResearch] Starting autonomous discovery...
+E      autonomous-research                2025-10-13 10:32:18.598
+I      autonomous-research                2025-10-13 10:31:38.647  Default STARTUP TCP probe succeeded after 1 attempt for container "worker" on port 8080.
+I      autonomous-research                2025-10-13 10:31:34.568  Starting new instance. Reason: AUTOSCALING - Instance started due to configured scaling factors (e.g. CPU utilization, request throughput, etc.) or no existing capacity for current traffic.
+I      autonomous-research                2025-10-13 10:31:33.329  Default STARTUP TCP probe succeeded after 1 attempt for container "worker" on port 8080.
+I      autonomous-research                2025-10-13 10:31:28.310  Starting new instance. Reason: DEPLOYMENT_ROLLOUT - Instance started due to traffic shifting between revisions due to deployment, traffic split adjustment, or deployment health check.
+I      autonomous-research                2025-10-13 10:30:04.506  Default STARTUP TCP probe succeeded after 1 attempt for container "worker" on port 8080.
+       autonomous-research  ozrwlwh116vg  2025-10-13 10:30:04.245  [autonomousResearch] Starting autonomous discovery...
+       autonomous-research  ozrwlawrvgq6  2025-10-13 10:30:04.227  [autonomousResearch] Starting autonomous discovery...
+I      autonomous-research                2025-10-13 10:30:04.172  Default STARTUP TCP probe succeeded after 1 attempt for container "worker" on port 8080.
+I      autonomous-research                2025-10-13 10:30:01.663  Starting new instance. Reason: AUTOSCALING - Instance started due to configured scaling factors (e.g. CPU utilization, request throughput, etc.) or no existing capacity for current traffic.
+E      autonomous-research                2025-10-13 10:30:01.660
+I      autonomous-research                2025-10-13 10:30:01.221  Starting new instance. Reason: AUTOSCALING - Instance started due to configured scaling factors (e.g. CPU utilization, request throughput, etc.) or no existing capacity for current traffic.
+E      autonomous-research                2025-10-13 10:30:01.188
+       autonomous-research  oyr39pkx3s8m  2025-10-13 10:01:26.611  [autonomousResearch] Starting autonomous discovery...
+E      autonomous-research                2025-10-13 10:01:26.572
+I      autonomous-research                2025-10-13 09:59:02.254  Default STARTUP TCP probe succeeded after 1 attempt for container "worker" on port 8080.
+I      autonomous-research                2025-10-13 09:58:58.224  Starting new instance. Reason: DEPLOYMENT_ROLLOUT - Instance started due to traffic shifting between revisions due to deployment, traffic split adjustment, or deployment health check.
+       autonomous-research  oyhh6zipu0kr  2025-10-13 09:53:58.091  [autonomousResearch] Starting autonomous discovery...
+E      autonomous-research                2025-10-13 09:53:58.064
+       autonomous-research  oy6yu2aip0w7  2025-10-13 09:45:47.744  [autonomousResearch] Starting autonomous discovery...
+E      autonomous-research                2025-10-13 09:45:47.683
+I      autonomous-research                2025-10-13 09:36:05.264  Default STARTUP TCP probe succeeded after 1 attempt for container "worker" on port 8080.
+I      autonomous-research                2025-10-13 09:36:00.119  Starting new instance. Reason: DEPLOYMENT_ROLLOUT - Instance started due to traffic shifting between revisions due to deployment, traffic split adjustment, or deployment health check.
+I      autonomous-research                2025-10-13 09:32:47.931  Default STARTUP TCP probe succeeded after 1 attempt for container "worker" on port 8080.
+I      autonomous-research                2025-10-13 09:32:44.134  Starting new instance. Reason: DEPLOYMENT_ROLLOUT - Instance started due to traffic shifting between revisions due to deployment, traffic split adjustment, or deployment health check.
+       autonomous-research  ovhlzdwmh5wf  2025-10-13 08:30:37.428  [autonomousResearch] No topics discovered
+       autonomous-research  ovhlzdwmh5wf  2025-10-13 08:30:37.427  [discoverTopicsForCategory:science] Problematic JSON: {  "topics": [    {      "topic": "ISRO announces final crew selection for Gaganyaan mission, detailing training phases and mission objectives.",      "category": "science",      "priority": 9,      "reasoning": "With the Gaganyaan mission nearing its human spaceflight phase, an update on crew selection and training is a major national and international space news story, highly anticipated in India."    },    {      "topic": "NASA announces the commencement of intensive lunar surface training fo
+       autonomous-research  ovhlzdwmh5wf  2025-10-13 08:30:37.427  [discoverTopicsForCategory:science] JSON parse failed: Expected ',' or ']' after array element in JSON at position 3898
+       autonomous-research  ovhlzdwmh5wf  2025-10-13 08:30:37.426  [discoverTopicsForCategory:science] Raw response length: 4404 chars
+       autonomous-research  ovhlzdwmh5wf  2025-10-13 08:30:37.426  [discoverTopicsForCategory:science] Finish reason: MAX_TOKENS
+       autonomous-research  ovhlzdwmh5wf  2025-10-13 08:30:37.426  [discoverTopicsForCategory:science] Text extracted: YES, length: 4404
+       autonomous-research  ovhlzdwmh5wf  2025-10-13 08:30:37.426  [discoverTopicsForCategory:science] Response keys: [
+                                                                     'sdkHttpResponse',
+                                                                     'candidates',
+                                                                     'modelVersion',
+                                                                     'responseId',
+                                                                     'usageMetadata'
+                                                                   ]
+       autonomous-research  ovhlzdwmh5wf  2025-10-13 08:30:37.423  [discoverTopicsForCategory:science] Response type: object
+       autonomous-research  ovhlzdwmh5wf  2025-10-13 08:30:05.454  [autonomousResearch] Discovering topics (category: science, region: IN)
+       autonomous-research  ovhlzdwmh5wf  2025-10-13 08:30:05.454  [autonomousResearch] Starting autonomous discovery...
+I      autonomous-research                2025-10-13 08:30:05.376  Default STARTUP TCP probe succeeded after 1 attempt for container "worker" on port 8080.
+I      autonomous-research                2025-10-13 08:30:01.558  Starting new instance. Reason: AUTOSCALING - Instance started due to configured scaling factors (e.g. CPU utilization, request throughput, etc.) or no existing capacity for current traffic.
+I      autonomous-research                2025-10-13 08:30:01.522
+       autonomous-research  otcj2y71ueyn  2025-10-13 07:30:41.846  [autonomousResearch] No topics discovered
+       autonomous-research  otcj2y71ueyn  2025-10-13 07:30:41.846  [discoverTopicsForCategory:entertainment] Problematic JSON: {  "topics": [    {      "topic": "\"Singham Again\" (Rohit Shetty, Ajay Devgn) Day 3 Box Office Collection & Public Reviews",      "category": "entertainment",      "priority": 10,      "reasoning": "Major Bollywood release for pre-Diwali, released Oct 10th. Box office numbers and audience reactions are highly trending."    },    {      "topic": "\"Veer Yodha\" (Hrithik Roshan, Katrina Kaif) Opening Weekend Box Office Performance & Critical Reception",      "category": "entertainment",      "pr
+       autonomous-research  otcj2y71ueyn  2025-10-13 07:30:41.845  [discoverTopicsForCategory:entertainment] JSON parse failed: Expected ',' or ']' after array element in JSON at position 1214
+       autonomous-research  otcj2y71ueyn  2025-10-13 07:30:41.844  [discoverTopicsForCategory:entertainment] Raw response length: 1275 chars
+       autonomous-research  otcj2y71ueyn  2025-10-13 07:30:41.844  [discoverTopicsForCategory:entertainment] Finish reason: MAX_TOKENS
+       autonomous-research  otcj2y71ueyn  2025-10-13 07:30:41.843  [discoverTopicsForCategory:entertainment] Text extracted: YES, length: 1275
+       autonomous-research  otcj2y71ueyn  2025-10-13 07:30:41.843  [discoverTopicsForCategory:entertainment] Response keys: [
+                                                                     'sdkHttpResponse',
+                                                                     'candidates',
+                                                                     'modelVersion',
+                                                                     'responseId',
+                                                                     'usageMetadata'
+                                                                   ]
+       autonomous-research  otcj2y71ueyn  2025-10-13 07:30:41.841  [discoverTopicsForCategory:entertainment] Response type: object
+       autonomous-research  otcj2y71ueyn  2025-10-13 07:30:09.185  [autonomousResearch] Discovering topics (category: entertainment, region: IN)
+       autonomous-research  otcj2y71ueyn  2025-10-13 07:30:09.185  [autonomousResearch] Starting autonomous discovery...
+I      autonomous-research                2025-10-13 07:30:09.122  Default STARTUP TCP probe succeeded after 1 attempt for container "worker" on port 8080.
+I      autonomous-research                2025-10-13 07:30:05.558  Starting new instance. Reason: AUTOSCALING - Instance started due to configured scaling factors (e.g. CPU utilization, request throughput, etc.) or no existing capacity for current traffic.
+I      autonomous-research                2025-10-13 07:30:05.528
+       autonomous-research  os9uokdpqw26  2025-10-13 07:00:36.406  [autonomousResearch] No topics discovered
+       autonomous-research  os9uokdpqw26  2025-10-13 07:00:36.406  [discoverTopicsForCategory:technology] Problematic JSON: {  "topics": [    {      "topic": "Google Pixel 10 Pro India launch and initial reviews",      "category": "technology",      "priority": 9,      "reasoning": "The Pixel 10 series is expected to launch in early October 2025. Post-launch buzz, availability in India, and early reviews of its AI features and camera are highly trending."    },    {      "topic": "OpenAI GPT-5.5 multimodal model preview and API release",      "category": "technology",      "priority": 10,      "reasoning": "Ongoing a
+       autonomous-research  os9uokdpqw26  2025-10-13 07:00:36.405  [discoverTopicsForCategory:technology] JSON parse failed: Expected ',' or ']' after array element in JSON at position 4438
+       autonomous-research  os9uokdpqw26  2025-10-13 07:00:36.405  [discoverTopicsForCategory:technology] Raw response length: 4644 chars
+       autonomous-research  os9uokdpqw26  2025-10-13 07:00:36.405  [discoverTopicsForCategory:technology] Finish reason: MAX_TOKENS
+       autonomous-research  os9uokdpqw26  2025-10-13 07:00:36.405  [discoverTopicsForCategory:technology] Text extracted: YES, length: 4644
+       autonomous-research  os9uokdpqw26  2025-10-13 07:00:36.404  [discoverTopicsForCategory:technology] Response keys: [
+                                                                     'sdkHttpResponse',
+                                                                     'candidates',
+                                                                     'modelVersion',
+                                                                     'responseId',
+                                                                     'usageMetadata'
+                                                                   ]
+       autonomous-research  os9uokdpqw26  2025-10-13 07:00:36.402  [discoverTopicsForCategory:technology] Response type: object
+       autonomous-research  os9uokdpqw26  2025-10-13 07:00:04.636  [autonomousResearch] Discovering topics (category: technology, region: IN)
+       autonomous-research  os9uokdpqw26  2025-10-13 07:00:04.635  [autonomousResearch] Starting autonomous discovery...
+I      autonomous-research                2025-10-13 07:00:04.542  Default STARTUP TCP probe succeeded after 1 attempt for container "worker" on port 8080.
+I      autonomous-research                2025-10-13 07:00:01.061  Starting new instance. Reason: AUTOSCALING - Instance started due to configured scaling factors (e.g. CPU utilization, request throughput, etc.) or no existing capacity for current traffic.
+I      autonomous-research                2025-10-13 07:00:01.031
+       autonomous-research  or7addrmvfi6  2025-10-13 06:31:28.884  [autonomousResearch] Complete: 25 topics ? 25 clusters
+       autonomous-research  or7addrmvfi6  2025-10-13 06:31:28.865  [autonomousResearch]   Created 1 clusters
+       autonomous-research  or7addrmvfi6  2025-10-13 06:31:27.067  [autonomousResearch]   Created 1 clusters
+       autonomous-research  or7addrmvfi6  2025-10-13 06:31:26.812  [autonomousResearch]   Created 1 clusters
+       autonomous-research  or7addrmvfi6  2025-10-13 06:31:26.285  [autonomousResearch]   Created 1 clusters
+       autonomous-research  or7addrmvfi6  2025-10-13 06:31:24.166  [autonomousResearch]   Created 1 clusters
+       autonomous-research  or7addrmvfi6  2025-10-13 06:31:14.909  [autonomousResearch]   Generated 4 queries, found 18 sources
+       autonomous-research  or7addrmvfi6  2025-10-13 06:31:14.909  [searchWithGoogleCSE]   - Prime Minister Shri Narendra Modi's Guaranteed Gift Of ...... (cmogujarat.gov.in)
+       autonomous-research  or7addrmvfi6  2025-10-13 06:31:14.909  [searchWithGoogleCSE]   - Prime Minister Shri Narendra Modi Inaugurates, Lays Foundati... (mohfw.gov.in)
+       autonomous-research  or7addrmvfi6  2025-10-13 06:31:14.909  [searchWithGoogleCSE]   - AIIMS Jammu... (aiimsjammu.edu.in)
+       autonomous-research  or7addrmvfi6  2025-10-13 06:31:14.909  [searchWithGoogleCSE]   - Health Minister inaugurates 2 new Govt Medical Colleges in M... (medicaldialogues.in)
+       autonomous-research  or7addrmvfi6  2025-10-13 06:31:14.909  [searchWithGoogleCSE]   - All Press Release: Press Information Bureau... (pib.gov.in)
+       autonomous-research  or7addrmvfi6  2025-10-13 06:31:14.909  [searchWithGoogleCSE]   - Agreements signed to Establish Four New Medical Colleges in ... (mohfw.gov.in)
+       autonomous-research  or7addrmvfi6  2025-10-13 06:31:14.909  [searchWithGoogleCSE]   - Home | Jawaharlal Institute of Postgraduate Medical Educatio... (jipmer.edu.in)
+       autonomous-research  or7addrmvfi6  2025-10-13 06:31:14.908  [searchWithGoogleCSE]   - Press Releases | Ministry of Health and Family Welfare | GOI... (mohfw.gov.in)
+       autonomous-research  or7addrmvfi6  2025-10-13 06:31:14.908  [searchWithGoogleCSE] Found 8 results
+       autonomous-research  or7addrmvfi6  2025-10-13 06:31:14.877  [searchWithGoogleCSE]   - FSSAI... (fssai.gov.in)
+       autonomous-research  or7addrmvfi6  2025-10-13 06:31:14.877  [searchWithGoogleCSE]   - NMC... (nmc.org.in)
+       autonomous-research  or7addrmvfi6  2025-10-13 06:31:14.877  [searchWithGoogleCSE]   - MEDIA ROOM - NABARD - National Bank For Agriculture And Rura... (nabard.org)
+       autonomous-research  or7addrmvfi6  2025-10-13 06:31:14.877  [searchWithGoogleCSE]   - Government of Tamil Nadu... (tn.gov.in)
+       autonomous-research  or7addrmvfi6  2025-10-13 06:31:14.877  [searchWithGoogleCSE]   - All Press Release: Press Information Bureau... (pib.gov.in)
+       autonomous-research  or7addrmvfi6  2025-10-13 06:31:14.877  [searchWithGoogleCSE]   - Union Health Minister Shri JP Nadda Inaugurates New Governme... (mohfw.gov.in)
+       autonomous-research  or7addrmvfi6  2025-10-13 06:31:14.876  [searchWithGoogleCSE]   - Home Page:Press Information Bureau... (pib.gov.in)
+       autonomous-research  or7addrmvfi6  2025-10-13 06:31:14.875  [searchWithGoogleCSE]   - Press Releases | Ministry of Health and Family Welfare | GOI... (mohfw.gov.in)
+       autonomous-research  or7addrmvfi6  2025-10-13 06:31:14.875  [searchWithGoogleCSE] Found 8 results
+       autonomous-research  or7addrmvfi6  2025-10-13 06:31:14.858  [searchWithGoogleCSE]   - FSSAI... (fssai.gov.in)
+       autonomous-research  or7addrmvfi6  2025-10-13 06:31:14.858  [searchWithGoogleCSE]   - Prime Minister Shri Narendra Modi Inaugurates, Lays Foundati... (mohfw.gov.in)
+       autonomous-research  or7addrmvfi6  2025-10-13 06:31:14.858  [searchWithGoogleCSE]   - NMC... (nmc.org.in)
+       autonomous-research  or7addrmvfi6  2025-10-13 06:31:14.858  [searchWithGoogleCSE]   - Home | Ministry of Youth Affairs and Sports | Government of ... (yas.gov.in)
+       autonomous-research  or7addrmvfi6  2025-10-13 06:31:14.858  [searchWithGoogleCSE]   - Home | Jawaharlal Institute of Postgraduate Medical Educatio... (jipmer.edu.in)
+       autonomous-research  or7addrmvfi6  2025-10-13 06:31:14.858  [searchWithGoogleCSE]   - Agreements signed to Establish Four New Medical Colleges in ... (mohfw.gov.in)
+       autonomous-research  or7addrmvfi6  2025-10-13 06:31:14.858  [searchWithGoogleCSE]   - All Press Release: Press Information Bureau... (pib.gov.in)
+       autonomous-research  or7addrmvfi6  2025-10-13 06:31:14.857  [searchWithGoogleCSE]   - Press Releases | Ministry of Health and Family Welfare | GOI... (mohfw.gov.in)
+       autonomous-research  or7addrmvfi6  2025-10-13 06:31:14.857  [searchWithGoogleCSE] Found 8 results
+       autonomous-research  or7addrmvfi6  2025-10-13 06:31:14.839  [searchWithGoogleCSE]   - AIIMS Gorakhpur | ALL INDIA INSTITUTE OF MEDICAL SCIENCES ..... (aiimsgorakhpur.edu.in)
+       autonomous-research  or7addrmvfi6  2025-10-13 06:31:14.839  [searchWithGoogleCSE]   - PM Modi to launch, inaugurate multiple health sector project... (ddnews.gov.in)
+       autonomous-research  or7addrmvfi6  2025-10-13 06:31:14.839  [searchWithGoogleCSE]   - Prime Minister Shri Narendra Modi's Guaranteed Gift Of ...... (cmogujarat.gov.in)
+       autonomous-research  or7addrmvfi6  2025-10-13 06:31:14.838  [searchWithGoogleCSE]   - AIIMS Jammu... (aiimsjammu.edu.in)
+       autonomous-research  or7addrmvfi6  2025-10-13 06:31:14.838  [searchWithGoogleCSE]   - Health Minister inaugurates 2 new Govt Medical Colleges in M... (medicaldialogues.in)
+       autonomous-research  or7addrmvfi6  2025-10-13 06:31:14.838  [searchWithGoogleCSE]   - Home | Jawaharlal Institute of Postgraduate Medical Educatio... (jipmer.edu.in)
+       autonomous-research  or7addrmvfi6  2025-10-13 06:31:14.838  [searchWithGoogleCSE]   - Press Releases | Ministry of Health and Family Welfare | GOI... (mohfw.gov.in)
+       autonomous-research  or7addrmvfi6  2025-10-13 06:31:14.838  [searchWithGoogleCSE]   - All Press Release: Press Information Bureau... (pib.gov.in)
+       autonomous-research  or7addrmvfi6  2025-10-13 06:31:14.838  [searchWithGoogleCSE] Found 8 results
+       autonomous-research  or7addrmvfi6  2025-10-13 06:31:14.654  [autonomousResearch]   Generated 4 queries, found 18 sources
+       autonomous-research  or7addrmvfi6  2025-10-13 06:31:14.654  [searchWithGoogleCSE]   - Systemic Review of Organ Donations in Madhya Pradesh, India ... (gavinpublishers.com)
+       autonomous-research  or7addrmvfi6  2025-10-13 06:31:14.654  [searchWithGoogleCSE]   - Angdaan - Jeevan Sanjeevani Abhiyaan (?????? ? ???? ??????? ... (eoisaotome.gov.in)
+       autonomous-research  or7addrmvfi6  2025-10-13 06:31:14.654  [searchWithGoogleCSE]   - A 2-minute pledge TODAY, can add many years to the lives of ... (facebook.com)
+       autonomous-research  or7addrmvfi6  2025-10-13 06:31:14.654  [searchWithGoogleCSE]   - Women, kin of deceased donors to get priority in organ trans... (thehindu.com)
+       autonomous-research  or7addrmvfi6  2025-10-13 06:31:14.654  [searchWithGoogleCSE]   - GUIDELINES FOR IMPLEMENTATION OF NATIONAL ORGAN ...... (notto.mohfw.gov.in)
+       autonomous-research  or7addrmvfi6  2025-10-13 06:31:14.653  [searchWithGoogleCSE]   - Chintan Shivir on ?Reforms required for augmentation of orga... (mohfw.gov.in)
+       autonomous-research  or7addrmvfi6  2025-10-13 06:31:14.653  [searchWithGoogleCSE]   - NOTTO ?Annual Report (2023-24)... (notto.mohfw.gov.in)
+       autonomous-research  or7addrmvfi6  2025-10-13 06:31:14.653  [searchWithGoogleCSE]   - Press Releases | Ministry of Health and Family Welfare | GOI... (mohfw.gov.in)
+       autonomous-research  or7addrmvfi6  2025-10-13 06:31:14.653  [searchWithGoogleCSE] Found 8 results
+       autonomous-research  or7addrmvfi6  2025-10-13 06:31:14.651  [searchWithGoogleCSE]   - India Launches Multi-Faceted Campaign to Boost Organ Donatio... (legalitysimplified.com)
+       autonomous-research  or7addrmvfi6  2025-10-13 06:31:14.650  [searchWithGoogleCSE]   - Women, kin of deceased donors to get priority in organ trans... (thehindu.com)

@@ -2,6 +2,7 @@ import { GoogleGenAI } from '@google/genai';
 import { isHealthRelated } from '@/lib/textAnalysis';
 import { OJAS_LITE_SYSTEM } from './systemPrompts';
 import { languageStore } from './languageStore';
+// Function-calling removed per latest design: no function tools are offered
 
 const API_KEY = (import.meta.env?.VITE_GEMINI_API_KEY as string) || '';
 
@@ -219,7 +220,192 @@ class GeminiLiteService {
     }
   }
 
-  async generateResponse(message: string, options?: { historyText?: string; historyParts?: Array<{ role: 'user' | 'model'; parts: Array<{ text: string }> }>; forceSearch?: boolean; thinkingBudget?: number; files?: File[]; maxTokens?: number }): Promise<{ content: string; isHealthRelated: boolean; sources?: Array<{ title: string; url: string; snippet?: string; displayUrl?: string }> }> {
+  // Enforce paragraph-first style for shopping/product responses and instruct inline citations
+  private enforceProductStyleNote(message: string): string {
+    try {
+      const m = (message || '').toLowerCase();
+      const shoppingSignals = /(price|cost|under\s*₹?|budget|best|top|vs|compare|spec|model|buy|where to|deal|₹|rs\.?|rupees)/i;
+      if (!shoppingSignals.test(m)) return '';
+      return `\n\nSTRICT OUTPUT FORMAT (Shopping/Product):\n- Use paragraph-style sentences.\n- Do NOT create nested bullet lists (no "Key Specifications:" sub-lists).\n- For each pick, write one compact paragraph: **Model** — Price: ₹X–₹Y; Key specs: s1; s2; s3; Best for: ...\n- CRITICAL: Add inline citations [1], [2], [3] RIGHT AFTER each sentence that uses web data (prices/specs/availability).\n- Example: "The RTX 4060 costs ₹32,000. [1] It offers excellent 1080p performance. [2]"\n- Cite as you write facts throughout the response, NOT bunched at the end.\n- NO "References:" section - inline citations only.`;
+    } catch { return ''; }
+  }
+
+  // Flatten common nested product bullets (e.g., "Key Specifications:" followed by dotted sub-points) into inline sentences
+  // Inject inline citations [n] based on grounding segment data (like Perplexity/Pulse)
+  // Groups citations by sentence to show as "Source +N" instead of separate badges
+  private injectCitations(text: string, groundingMetadata: any): string {
+    if (!groundingMetadata?.groundingSupports || !text) return text;
+    
+    try {
+      // Build map of chunk index to citation number
+      const chunkToCitation = new Map<number, number>();
+      const processedChunks = new Set<number>();
+      let citationNum = 1;
+      
+      // Collect all segments with their positions and chunk indices
+      const segments: Array<{ start: number; end: number; chunkIndices: number[] }> = [];
+      for (const support of groundingMetadata.groundingSupports) {
+        if (support?.segment?.startIndex !== undefined && support?.segment?.endIndex !== undefined && support?.groundingChunkIndices) {
+          segments.push({
+            start: support.segment.startIndex,
+            end: support.segment.endIndex,
+            chunkIndices: support.groundingChunkIndices
+          });
+        }
+      }
+      
+      // Sort segments by end position
+      segments.sort((a, b) => a.end - b.end);
+      
+      // Assign citation numbers to chunks in order of appearance
+      for (const seg of segments) {
+        for (const chunkIdx of seg.chunkIndices) {
+          if (!processedChunks.has(chunkIdx)) {
+            chunkToCitation.set(chunkIdx, citationNum++);
+            processedChunks.add(chunkIdx);
+          }
+        }
+      }
+      
+      // Find PARAGRAPH boundaries - citations should only appear at paragraph/section ends, not every sentence
+      const paragraphEnds: number[] = [];
+      // Split by double newline (paragraph breaks) and single newline followed by heading/numbering
+      const lines = text.split('\n');
+      let currentPos = 0;
+      let inParagraph = false;
+      
+      for (let i = 0; i < lines.length; i++) {
+        const line = lines[i];
+        const lineEnd = currentPos + line.length;
+        const nextLine = i < lines.length - 1 ? lines[i + 1] : '';
+        
+        // End of paragraph if: next line is empty, next line is heading, or last line with content
+        const isLastLine = i === lines.length - 1;
+        const nextIsEmpty = !nextLine.trim();
+        const nextIsHeading = /^#{1,6}\s/.test(nextLine) || /^\d+\.\s/.test(nextLine) || /^\*\*\d+\./.test(nextLine);
+        
+        if (line.trim() && (isLastLine || nextIsEmpty || nextIsHeading)) {
+          // This line ends a paragraph - find last sentence end in this line
+          const sentenceMatches = line.match(/[.!?](?:\s|$)/g);
+          if (sentenceMatches && sentenceMatches.length > 0) {
+            // Use the LAST sentence end in this paragraph line
+            const lastSentencePos = line.lastIndexOf(sentenceMatches[sentenceMatches.length - 1]);
+            if (lastSentencePos !== -1) {
+              paragraphEnds.push(currentPos + lastSentencePos + 1);
+            }
+          }
+        }
+        
+        currentPos = lineEnd + 1; // +1 for newline
+      }
+      
+      if (paragraphEnds.length === 0 || paragraphEnds[paragraphEnds.length - 1] !== text.length) {
+        paragraphEnds.push(text.length);
+      }
+      
+      // Group segments by paragraph (find which paragraph each segment belongs to)
+      const paragraphCitations = new Map<number, Set<number>>();
+      for (const seg of segments) {
+        // Find the paragraph that this segment belongs to (based on seg.end)
+        const paragraphIdx = paragraphEnds.findIndex(endPos => seg.end <= endPos);
+        if (paragraphIdx === -1) continue;
+        
+        const paragraphEnd = paragraphEnds[paragraphIdx];
+        if (!paragraphCitations.has(paragraphEnd)) {
+          paragraphCitations.set(paragraphEnd, new Set());
+        }
+        
+        // Add all citation numbers for this segment to the paragraph
+        for (const chunkIdx of seg.chunkIndices) {
+          const citNum = chunkToCitation.get(chunkIdx);
+          if (citNum) paragraphCitations.get(paragraphEnd)!.add(citNum);
+        }
+      }
+      
+      // Detect heading lines (markdown ## or numbered 1. 2. 3.) to skip citations in headings
+      const headingRanges: Array<{ start: number; end: number }> = [];
+      const lines2 = text.split('\n');
+      let currentPos2 = 0;
+      for (const line of lines2) {
+        const lineEnd = currentPos2 + line.length;
+        // Check if line is a heading (markdown ## or numbered list like "1. ")
+        if (/^#{1,6}\s/.test(line) || /^\d+\.\s/.test(line)) {
+          headingRanges.push({ start: currentPos2, end: lineEnd });
+        }
+        currentPos2 = lineEnd + 1; // +1 for newline
+      }
+      
+      // Helper to check if position is within a heading
+      const isInHeading = (pos: number) => {
+        return headingRanges.some(range => pos >= range.start && pos <= range.end);
+      };
+      
+      // Now inject grouped citations at paragraph ends (working backwards), but skip headings
+      const sortedParagraphEnds = Array.from(paragraphCitations.keys()).sort((a, b) => b - a);
+      let result = text;
+      
+      for (const paragraphEnd of sortedParagraphEnds) {
+        // Skip if this citation would be in a heading
+        if (isInHeading(paragraphEnd)) {
+          console.log('⏭️ Skipping citation in heading at position', paragraphEnd);
+          continue;
+        }
+        
+        const citations = Array.from(paragraphCitations.get(paragraphEnd)!).sort((a, b) => a - b);
+        if (citations.length === 0) continue;
+        
+        // Format as [1][2][3] (consecutive for grouping in UI)
+        const citationText = citations.map(n => `[${n}]`).join('');
+        
+        // Insert at paragraph end
+        let insertPos = paragraphEnd;
+        if (insertPos > result.length) insertPos = result.length;
+        
+        // Insert citation right after punctuation
+        const before = result.substring(0, insertPos);
+        const after = result.substring(insertPos);
+        const needsSpace = before.length > 0 && !/\s$/.test(before);
+        result = before + (needsSpace ? ' ' : '') + citationText + (after && !/^\s/.test(after) ? ' ' : '') + after;
+      }
+      
+      console.log('📌 Injected', processedChunks.size, 'citations grouped into', paragraphCitations.size, 'paragraphs');
+      return result;
+    } catch (err) {
+      console.warn('⚠️ Citation injection failed:', err);
+      return text;
+    }
+  }
+  
+  private flattenProductBullets(text: string): string {
+    try {
+      let out = text;
+      // 1) Collapse "Key Specifications:" blocks into one inline line
+      out = out.replace(/(^|\n)[ \t]*[-*]\s*Key\s*Specifications:\s*\n((?:[ \t]*[-*]\s.*\n)+)/gi, (_m, p1, block) => {
+        const items = block
+          .split(/\n+/)
+          .map((l: string) => l.trim())
+          .filter((l: string) => /^[-*]\s/.test(l))
+          .map((l: string) => l.replace(/^[-*]\s*/, '').replace(/\.*\s*$/, ''))
+          .filter(Boolean);
+        if (items.length === 0) return _m;
+        const inline = items.join('; ');
+        return `${p1}Key specs: ${inline}.\n`;
+      });
+
+      // 2) Normalize common field labels and drop bullet markers
+      out = out.replace(/^[ \t]*[-*]\s*Price:\s*/gim, 'Price: ');
+      out = out.replace(/^[ \t]*[-*]\s*Best\s*Use\s*Case:\s*/gim, 'Best for: ');
+      out = out.replace(/^[ \t]*[-*]\s*Best\s*for:\s*/gim, 'Best for: ');
+
+      // 3) Merge typical three-line blocks under a numbered pick into one paragraph
+      out = out.replace(/(^\d+\.\s[^\n]+)\nPrice:\s*([^\n]+)\nKey\s*specs:\s*([^\n]+)\nBest\s*for:\s*([^\n]+)(?=\n|$)/gim,
+        (_m, head, price, specs, best) => `${String(head)} — Price: ${String(price).trim()}; Key specs: ${String(specs).trim()}; Best for: ${String(best).trim()}.`);
+
+      return out;
+    } catch { return text; }
+  }
+
+  async generateResponse(message: string, options?: { historyText?: string; historyParts?: Array<{ role: 'user' | 'model'; parts: Array<{ text: string }> }>; forceSearch?: boolean; thinkingBudget?: number; files?: File[]; maxTokens?: number; memoryContext?: string }): Promise<{ content: string; isHealthRelated: boolean; sources?: Array<{ title: string; url: string; snippet?: string; displayUrl?: string }> }> {
     const isHealth = this.isHealthRelated(message);
     const currentTime = this.getCurrentTimeContext();
 
@@ -253,14 +439,19 @@ ${options?.historyText ? `CONVERSATION HISTORY:\n${options.historyText}` : ''}`;
     // Enable built-in Google Search tool when likely needed for fresh or specific facts
     const doSearch = (
       options?.forceSearch === true ||
-      /\b(latest|recent|news|today|yesterday|tomorrow|this week|this month|this year|next week|next month|next year|202[4-9]|update|changed|price|cost|mrp|compare|comparison|availability|stock|buy|where to|market|launch|release|schedule|fixture|fixtures|when|start|date|month|year|season|tournament|ipl|match|guideline|policy|regulation|study|trial|paper|review|india|WHO|FDA|EMA|NICE|best|top|under|rupees|rs|laptop|mobile|phone|graphics|card|rtx|gtx|2050|gaming)\b/i.test(message)
+      /\b(latest|recent|news|today|yesterday|tomorrow|this week|this month|this year|next week|next month|next year|202[4-9]|update|changed|price|cost|mrp|compare|comparison|availability|stock|buy|where to|market|launch|release|schedule|fixture|fixtures|when|start|date|month|year|season|tournament|ipl|match|guideline|policy|regulation|study|trial|paper|review|india|WHO|FDA|EMA|NICE|best|top|under|recommend|recommendation|pick|picks|laptop|mobile|phone|graphics|card|rtx|gtx|2050|gaming)\b|under\s*₹?|₹/i.test(message)
     );
     
     // Removed verbose logging
     const lang = languageStore.get();
     const languageNote = `LANGUAGE PREFERENCE: ${lang?.label || 'English'} (${lang?.code || 'en'}). Respond ONLY in ${lang?.label || 'English'}. Do not code-switch unless explicitly asked.`;
+    
+    // Inject user memory context (like ChatGPT/Gemini do)
+    const memoryContext = options?.memoryContext || '';
+    
+    const styleNote = this.enforceProductStyleNote(message);
     const config: Record<string, any> = { 
-      systemInstruction: `${OJAS_LITE_SYSTEM}\n\n${this.getCurrentTimeContext()}\n\n${languageNote}`,
+      systemInstruction: `${OJAS_LITE_SYSTEM}\n\n${this.getCurrentTimeContext()}\n\n${languageNote}${memoryContext}${styleNote}`,
       generationConfig: {
         temperature: 0.7,
         maxOutputTokens: options?.maxTokens ?? 8192
@@ -274,15 +465,12 @@ ${options?.historyText ? `CONVERSATION HISTORY:\n${options.historyText}` : ''}`;
       tools.push({ urlContext: {} });
     }
     if (doSearch || hasUrl) {
-      // Add Google Search for web searches or to complement URL analysis
+      // Add Google Search tool
       tools.push({ googleSearch: {} });
-    }
-    
-    // Add thinking mode if specified; default to dynamic (-1)
-    if (options?.thinkingBudget !== undefined) {
-      config.thinkingConfig = { thinkingBudget: options.thinkingBudget, includeThoughts: true };
-    } else {
-      config.thinkingConfig = { thinkingBudget: -1, includeThoughts: true };
+      // Enforce thinking mode for search/URL analysis
+      if (!config.thinkingConfig) {
+        config.thinkingConfig = { thinkingBudget: -1 }; // unlimited thinking for better analysis
+      }
     }
     
     if (tools.length > 0) {
@@ -290,10 +478,11 @@ ${options?.historyText ? `CONVERSATION HISTORY:\n${options.historyText}` : ''}`;
       if (!config.thinkingConfig) {
         config.thinkingConfig = { thinkingBudget: -1 };
       }
-      // Request grounding metadata explicitly
-      config.generationConfig.responseSchema = undefined;
-      config.generationConfig.candidateCount = 1;
     }
+    
+    // Request grounding metadata explicitly
+    config.generationConfig.responseSchema = undefined;
+    config.generationConfig.candidateCount = 1;
 
     let full = '';
     let groundingMetadata: any = null;
@@ -306,12 +495,14 @@ ${options?.historyText ? `CONVERSATION HISTORY:\n${options.historyText}` : ''}`;
         const response: any = await this.withRetry(() => this.ai.models.generateContentStream({ model: this.model, config, contents }) as any);
         for await (const chunk of response) {
           if (chunk.text) full += chunk.text;
+          const cand = (chunk as any).candidates?.[0];
           if ((chunk as any).groundingMetadata) {
             groundingMetadata = (chunk as any).groundingMetadata;
           }
-          if ((chunk as any).candidates?.[0]?.groundingMetadata) {
-            groundingMetadata = (chunk as any).candidates[0].groundingMetadata;
+          if (cand?.groundingMetadata) {
+            groundingMetadata = cand.groundingMetadata;
           }
+          // Function calls are disabled; nothing to capture
         }
       })();
       
@@ -335,19 +526,30 @@ ${options?.historyText ? `CONVERSATION HISTORY:\n${options.historyText}` : ''}`;
         // Non-stream completed
       } catch (nonStreamErr) {
         console.error('GeminiLite non-stream also failed', nonStreamErr);
-        throw nonStreamErr;
+        // Fallback to non-streaming request when streaming yields empty text; avoid throwing and return a safe message instead
+        try {
+          const nonStream = await this.withRetry(() => this.ai.models.generateContent({ model: this.model, config, contents }));
+          const t: any = (nonStream as any).text;
+          full = typeof t === 'function' ? t.call(nonStream) || '' : (t ?? '');
+        } catch (e) {
+          console.warn('GeminiLite fallback non-stream failed:', e);
+        }
+      }
+      if (!full || full.trim().length === 0) {
+        return { content: 'I could not generate a response this time.', isHealthRelated: isHealth };
       }
     }
-
-    // Validate response
-    if (!full || full.trim().length === 0) {
-      console.error('GeminiLite - Empty response received');
-      throw new Error('Empty response from model');
-    }
     // Extract sources from grounding metadata
-    const sources = this.extractSources(groundingMetadata);
+    let sources = this.extractSources(groundingMetadata);
+    console.log('📋 [GeminiLite] Extracted sources:', sources.length);
+    // Post-process for paragraph-first shopping style
+    let finalOut = this.flattenProductBullets(full || '');
+    // Inject inline citations based on grounding segments
+    finalOut = this.injectCitations(finalOut, groundingMetadata);
+    const hasCitations = /\[\d+\]/.test(finalOut);
+    console.log('📝 [GeminiLite] Inline citations present:', hasCitations);
     return {
-      content: full,
+      content: finalOut,
       isHealthRelated: isHealth,
       sources: sources.length > 0 ? sources : undefined,
     };
@@ -356,7 +558,16 @@ ${options?.historyText ? `CONVERSATION HISTORY:\n${options.historyText}` : ''}`;
   // Stream response with real-time chunks. Calls onChunk for each delta and returns controller + finished promise.
   public streamResponse(
     message: string,
-    options: { historyText?: string; historyParts?: Array<{ role: 'user' | 'model'; parts: Array<{ text: string }> }>; forceSearch?: boolean; thinkingBudget?: number; files?: File[]; maxTokens?: number } | undefined,
+    options?: {
+      historyParts?: Array<{ role: 'user' | 'model'; parts: Array<{ text: string }> }>;
+      forceSearch?: boolean;
+      thinkingBudget?: number;
+      files?: File[];
+      memoryContext?: string;
+      maxTokens?: number;
+      chatId?: string;
+      messageId?: string;
+    } | undefined,
     onChunk?: (delta: string) => void,
     onEvent?: (evt: any) => void
   ): { stop: () => void; finished: Promise<{ content: string; isHealthRelated: boolean; sources?: Array<{ title: string; url: string; snippet?: string; displayUrl?: string }> }> } {
@@ -381,33 +592,42 @@ ${options?.historyText ? `CONVERSATION HISTORY:\n${options.historyText}` : ''}`;
       const hasUrl = urlPattern.test(message);
       const doSearch = (
         options?.forceSearch === true ||
-        /\b(latest|recent|news|today|yesterday|tomorrow|this week|this month|this year|next week|next month|next year|202[4-9]|update|changed|price|cost|mrp|compare|comparison|availability|stock|buy|where to|market|launch|release|schedule|fixture|fixtures|when|start|date|month|year|season|tournament|ipl|match|guideline|policy|regulation|study|trial|paper|review|india|WHO|FDA|EMA|NICE|best|top|under|rupees|rs|laptop|mobile|phone|graphics|card|rtx|gtx|2050|gaming)\b/i.test(message)
+        /\b(latest|recent|news|today|yesterday|tomorrow|this week|this month|this year|next week|next month|next year|202[4-9]|update|changed|price|cost|mrp|compare|comparison|availability|stock|buy|where to|market|launch|release|schedule|fixture|fixtures|when|start|date|month|year|season|tournament|ipl|match|guideline|policy|regulation|study|trial|paper|review|india|WHO|FDA|EMA|NICE|best|top|under|recommend|recommendation|pick|picks|laptop|mobile|phone|graphics|card|rtx|gtx|2050|gaming)\b|under\s*₹?|₹/i.test(message)
       );
       const lang = languageStore.get();
       const languageNote = `LANGUAGE PREFERENCE: ${lang?.label || 'English'} (${lang?.code || 'en'}). Respond ONLY in ${lang?.label || 'English'}. Do not code-switch unless explicitly asked.`;
+      
+      // Inject user memory context (like ChatGPT/Gemini do)
+      const memoryContext = (options as any)?.memoryContext || '';
+      
+      const styleNote = this.enforceProductStyleNote(message);
       const config: Record<string, any> = {
-        systemInstruction: `${OJAS_LITE_SYSTEM}\n\n${this.getCurrentTimeContext()}\n\n${languageNote}`,
-        generationConfig: { temperature: 0.7, maxOutputTokens: options?.maxTokens ?? 8192 }
+        systemInstruction: `${OJAS_LITE_SYSTEM}\n\n${this.getCurrentTimeContext()}\n\n${languageNote}${memoryContext}${styleNote}`,
+        generationConfig: { temperature: 0.7, maxOutputTokens: options?.maxTokens ?? 8192 },
+        // CRITICAL: Always enable thinking/thoughts for extended mode visibility
+        thinkingConfig: { 
+          thinkingBudget: options?.thinkingBudget !== undefined ? options.thinkingBudget : -1, 
+          includeThoughts: true 
+        }
       };
       const tools: any[] = [];
+      // Offer only web tools; function calling fully disabled
       if (hasUrl) tools.push({ urlContext: {} });
       if (doSearch || hasUrl) tools.push({ googleSearch: {} });
-      if (options?.thinkingBudget !== undefined) (config as any).thinkingConfig = { thinkingBudget: options.thinkingBudget, includeThoughts: true };
-      else (config as any).thinkingConfig = { thinkingBudget: -1, includeThoughts: true };
       if (tools.length > 0) {
         (config as any).tools = tools;
-        if (!(config as any).thinkingConfig) (config as any).thinkingConfig = { thinkingBudget: -1, includeThoughts: true };
         (config as any).generationConfig.responseSchema = undefined;
         (config as any).generationConfig.candidateCount = 1;
       }
 
       let full = '';
       let groundingMetadata: any = null;
+      const streamedFunctionCalls: any[] = [];
       const seenQueries = new Set<string>();
       const emitEvents = (chunk: any) => {
         try {
           const cand = (chunk as any)?.candidates?.[0];
-          const th = (cand as any)?.thoughts ?? (chunk as any)?.thoughts;
+          const th = (cand as any)?.thought ?? (chunk as any)?.thought;
           if (typeof th === 'string') onEvent?.({ type: 'thought', text: th });
           if (Array.isArray(th)) th.forEach((t: any) => {
             const txt = typeof t === 'string' ? t : (t?.text ?? '');
@@ -428,16 +648,35 @@ ${options?.historyText ? `CONVERSATION HISTORY:\n${options.historyText}` : ''}`;
       };
       try {
         const response: any = await this.withRetry(() => this.ai.models.generateContentStream({ model: this.model, config, contents }) as any);
-        for await (const chunk of response) {
-          if (stopped) break;
-          if ((chunk as any).groundingMetadata) groundingMetadata = (chunk as any).groundingMetadata;
-          if ((chunk as any).candidates?.[0]?.groundingMetadata) groundingMetadata = (chunk as any).candidates[0].groundingMetadata;
-          emitEvents(chunk);
-          if (chunk.text) {
-            full += chunk.text;
-            onChunk?.(chunk.text);
+
+        // Read stream with a timeout guard to avoid hanging UI
+        const reader = (async () => {
+          for await (const chunk of response) {
+            if (stopped) break;
+            const cand = (chunk as any).candidates?.[0];
+            if ((chunk as any).groundingMetadata) groundingMetadata = (chunk as any).groundingMetadata;
+            if (cand?.groundingMetadata) groundingMetadata = cand.groundingMetadata;
+            try {
+              const parts = cand?.content?.parts || [];
+              for (const p of parts) {
+                if (p?.functionCall?.name) streamedFunctionCalls.push({ name: p.functionCall.name, args: p.functionCall.args || {} });
+              }
+            } catch {}
+            emitEvents(chunk);
+            if (chunk.text) {
+              full += chunk.text;
+              // Stream immediately - token stripping happens at the end
+              onChunk?.(chunk.text);
+            }
           }
-        }
+        })();
+
+        const timeout = new Promise<void>((_, reject) => setTimeout(() => {
+          try { (stopped as any) = true; } catch {}
+          reject(new Error('STREAM_TIMEOUT: generateContentStream exceeded 25s'));
+        }, 25000));
+
+        await Promise.race([reader, timeout]);
       } catch {
         try {
           const nonStream = await this.withRetry(() => this.ai.models.generateContent({ model: this.model, config, contents }));
@@ -448,13 +687,65 @@ ${options?.historyText ? `CONVERSATION HISTORY:\n${options.historyText}` : ''}`;
           if (!stopped && full) onChunk?.(full);
         } catch {}
       }
-      if (!full || full.trim().length === 0) {
+      // CRITICAL: Strip [[ESCALATE_HEALTH]] tokens from final response only
+      // This happens when lite model tries to escalate but fast classifier missed it (rare edge case)
+      let sanitized = full.replace(/\[\[ESCALATE_HEALTH\]\][^\n]*/g, '').trim();
+      // Also strip any leaked tool/function annotations like [[function_call:...]] or [[tool_use:...]]
+      sanitized = sanitized
+        .replace(/\[\[(function_call|tool_use)[:\s][^\]]*\]\]/gi, '')
+        .replace(/```(?:json)?\s*\[\[(function_call|tool_use)[\s\S]*?\]\]\s*```/gi, '')
+        .trim();
+      
+      // Only use fallback message if there's truly no output at all
+      if (!sanitized || sanitized.length === 0) {
         return { content: 'I could not generate a response this time.', isHealthRelated: false };
       }
-      const sources = this.extractSources(groundingMetadata);
-      return { content: full, isHealthRelated: isHealth, sources: sources.length ? sources : undefined };
+      
+      // Try to extract sources from streamed grounding metadata. If empty but we performed search/URL analysis,
+      // do a quick non-stream call to retrieve grounding metadata for citations.
+      let sources = this.extractSources(groundingMetadata);
+      if ((!sources || sources.length === 0) && (hasUrl || doSearch)) {
+        try {
+          const nonStream = await this.withRetry(() => this.ai.models.generateContent({ model: this.model, config, contents }));
+          const cand2 = (nonStream as any)?.candidates?.[0];
+          const gm2 = (nonStream as any).groundingMetadata || cand2?.groundingMetadata;
+          const s2 = this.extractSources(gm2);
+          if (s2.length > 0) sources = s2;
+        } catch {}
+      }
+      // Post-process for paragraph-first shopping style
+      let finalOut = this.flattenProductBullets(sanitized);
+      // Inject inline citations based on grounding segments
+      finalOut = this.injectCitations(finalOut, groundingMetadata);
+      const hasCitations = /\[\d+\]/.test(finalOut);
+      console.log('📋 [GeminiLite Stream] Sources:', sources?.length || 0, '| Inline citations:', hasCitations);
+      return { content: finalOut, isHealthRelated: false, sources };
     })();
     return { stop: () => { stopped = true; }, finished };
+  }
+}
+
+// Helper methods
+// Note: Keep lightweight and resilient to SDK shape changes
+class _GeminiLiteHelpers {
+  static extractFunctionCallsFromResp(resp: any): Array<{ name: string; args: any }> {
+    try {
+      if (resp?.functionCalls && Array.isArray(resp.functionCalls)) {
+        return resp.functionCalls.map((fc: any) => ({ name: fc?.name, args: fc?.args || {} })).filter(x => !!x.name);
+      }
+      const out: Array<{ name: string; args: any }> = [];
+      const cands = resp?.candidates || [];
+      for (const c of cands) {
+        const parts = c?.content?.parts || [];
+        for (const p of parts) {
+          const fc = p?.functionCall;
+          if (fc?.name) out.push({ name: fc.name, args: fc.args || {} });
+        }
+      }
+      return out;
+    } catch {
+      return [];
+    }
   }
 }
 

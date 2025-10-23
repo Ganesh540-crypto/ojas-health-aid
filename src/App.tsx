@@ -12,38 +12,72 @@ import { CommandDialog, CommandEmpty, CommandGroup, CommandInput, CommandItem, C
 import AppShell from "@/components/Layout/AppShell";
 import { auth } from "@/lib/firebase";
 import { chatStore } from "@/lib/chatStore";
-const AuthPage = React.lazy(() => import('./pages/Auth'));
+const LoginPage = React.lazy(() => import('./pages/Login'));
+const SignupPage = React.lazy(() => import('./pages/Signup'));
 import NotFound from "./pages/NotFound";
 import VoiceMode from "./pages/VoiceMode";
 import FlowDemo from "./pages/FlowDemo";
 import Pulse from "./pages/Pulse";
+import { prefetchPulse, getPulseCache, isPulseCacheFresh } from "@/lib/pulseCache";
 import PulseArticle from "./pages/PulseArticle";
+import Privacy from "./pages/Privacy";
+import Terms from "./pages/Terms";
+import LandingPrivacy from "./pages/Landing/Privacy";
+import LandingTerms from "./pages/Landing/Terms";
+import LandingContact from "./pages/Landing/Contact";
+import LandingFAQ from "./pages/Landing/FAQ";
+import LandingAbout from "./pages/Landing/About";
+import VerifyEmail from "./pages/VerifyEmail";
+import EmailAction from "./pages/EmailAction";
+import LandingPage from "./pages/Landing";
 
 const queryClient = new QueryClient();
 
 const App = () => {
   const [open, setOpen] = useState(false);
-  const [bootReady, setBootReady] = useState(false);
+  const [bootReady, setBootReady] = useState(() => {
+    try { return sessionStorage.getItem('ojas.session.ready') === '1'; } catch { return false; }
+  });
+  const [showBootOverlay, setShowBootOverlay] = useState(false);
   const [bootError, setBootError] = useState<string | null>(null);
 
   // Early auth + chat hydration gate to avoid transient blank states.
   useEffect(() => {
-  // Using two timers: a no-op micro start (kept for type consistency) and the fallback timer.
-  const timeout: number = window.setTimeout(() => {}, 0);
-    const unsub = auth.onAuthStateChanged(async (u) => {
-      try {
-        if (u) {
-          await chatStore.hydrateFromCloud();
-        }
-      } catch (e) {
-        setBootError('Failed to sync chats (offline?)');
-      } finally {
-        setBootReady(true);
+    // Using two timers: a no-op micro start (kept for type consistency) and the fallback timer.
+    const timeout: number = window.setTimeout(() => {}, 0);
+    const unsub = auth.onAuthStateChanged((u) => {
+      // Do not gate UI on cloud hydration; allow app to render immediately
+      setBootReady(true);
+      try { sessionStorage.setItem('ojas.session.ready', '1'); } catch {}
+      if (u) {
+        chatStore.hydrateFromCloud().catch(() => setBootError('Failed to sync chats (offline?)'));
       }
     });
-  // Hard fallback after 7s to avoid perpetual spinner
-  const fallback = window.setTimeout(() => { if (!bootReady) setBootReady(true); }, 7000);
-  return () => { unsub(); clearTimeout(timeout); clearTimeout(fallback); };
+    // Hard fallback after 7s to avoid perpetual spinner if auth event never fires
+    const fallback = window.setTimeout(() => { if (!bootReady) setBootReady(true); }, 7000);
+    return () => { unsub(); clearTimeout(timeout); clearTimeout(fallback); };
+  }, [bootReady]);
+
+  // Delay showing the boot overlay to avoid flash on fast refreshes
+  useEffect(() => {
+    if (bootReady) { setShowBootOverlay(false); return; }
+    try { if (sessionStorage.getItem('ojas.session.overlay_seen') === '1') return; } catch {}
+    const t = window.setTimeout(() => {
+      setShowBootOverlay(true);
+      try { sessionStorage.setItem('ojas.session.overlay_seen', '1'); } catch {}
+    }, 1200);
+    return () => clearTimeout(t);
+  }, [bootReady]);
+
+  // Preload Pulse content in background once boot is ready
+  useEffect(() => {
+    if (!bootReady) return;
+    const cache = getPulseCache();
+    const run = () => prefetchPulse().catch(() => {});
+    if (!isPulseCacheFresh(cache)) {
+      const ric = (window as any).requestIdleCallback as ((cb: () => void, opts?: any) => void) | undefined;
+      if (ric) ric(run, { timeout: 1500 }); else setTimeout(run, 200);
+    }
   }, [bootReady]);
 
   // Toggle command with Ctrl/Cmd+K
@@ -86,29 +120,53 @@ const App = () => {
             </div>
           </div>
         )}
-        {(!bootReady) && (
-          <div className="fixed inset-0 flex flex-col items-center justify-center gap-2 text-xs text-muted-foreground">
+        {(!bootReady && showBootOverlay) && (
+          <div className="fixed inset-0 flex flex-col items-center justify-center gap-3 text-xs text-muted-foreground bg-background/80 backdrop-blur-sm z-[999]">
+            <div className="oj-loader" aria-label="Loading" role="status" />
             <span>Starting Ojas…</span>
             {bootError && <span className="text-destructive">{bootError}</span>}
+            <style>{`
+              .oj-loader{width:60px;display:flex;align-items:flex-start;aspect-ratio:1}
+              .oj-loader:before,.oj-loader:after{content:"";flex:1;aspect-ratio:1;--g:conic-gradient(from -90deg at 10px 10px,hsl(var(--primary)) 90deg,#0000 0);background:var(--g),var(--g),var(--g);filter:drop-shadow(30px 30px 0 hsl(var(--primary)));animation:l20 1s infinite}
+              .oj-loader:after{transform:scaleX(-1)}
+              @keyframes l20{0%{background-position:0 0,10px 10px,20px 20px}33%{background-position:10px 10px}66%{background-position:0 20px,10px 10px,20px 0}100%{background-position:0 0,10px 10px,20px 20px}}
+            `}</style>
           </div>
         )}
         <BrowserRouter>
           {bootReady && (
           <Routes>
-            <Route path="/login" element={<React.Suspense fallback={<div className="h-screen flex items-center justify-center text-sm text-muted-foreground">Loading auth…</div>}><AuthPage /></React.Suspense>} />
-            <Route path="/signup" element={<React.Suspense fallback={<div className="h-screen flex items-center justify-center text-sm text-muted-foreground">Loading auth…</div>}><AuthPage /></React.Suspense>} />
+            <Route path="/login" element={<React.Suspense fallback={<div className="h-screen flex items-center justify-center"><div className="oj-loader" aria-label="Loading" role="status" /><style>{`.oj-loader{width:60px;display:flex;align-items:flex-start;aspect-ratio:1}.oj-loader:before,.oj-loader:after{content:"";flex:1;aspect-ratio:1;--g:conic-gradient(from -90deg at 10px 10px,hsl(var(--primary)) 90deg,#0000 0);background:var(--g),var(--g),var(--g);filter:drop-shadow(30px 30px 0 hsl(var(--primary)));animation:l20 1s infinite}.oj-loader:after{transform:scaleX(-1)}@keyframes l20{0%{background-position:0 0,10px 10px,20px 20px}33%{background-position:10px 10px}66%{background-position:0 20px,10px 10px,20px 0}100%{background-position:0 0,10px 10px,20px 20px}}`}</style></div>}><LoginPage /></React.Suspense>} />
+            <Route path="/signup" element={<React.Suspense fallback={<div className="h-screen flex items-center justify-center"><div className="oj-loader" aria-label="Loading" role="status" /><style>{`.oj-loader{width:60px;display:flex;align-items:flex-start;aspect-ratio:1}.oj-loader:before,.oj-loader:after{content:"";flex:1;aspect-ratio:1;--g:conic-gradient(from -90deg at 10px 10px,hsl(var(--primary)) 90deg,#0000 0);background:var(--g),var(--g),var(--g);filter:drop-shadow(30px 30px 0 hsl(var(--primary)));animation:l20 1s infinite}.oj-loader:after{transform:scaleX(-1)}@keyframes l20{0%{background-position:0 0,10px 10px,20px 20px}33%{background-position:10px 10px}66%{background-position:0 20px,10px 10px,20px 0}100%{background-position:0 0,10px 10px,20px 20px}}`}</style></div>}><SignupPage /></React.Suspense>} />
+            <Route path="/verify-email" element={<VerifyEmail />} />
+            <Route path="/email-action" element={<EmailAction />} />
             <Route path="/onboarding" element={<RequireAuth><Onboarding /></RequireAuth>} />
             {/* Full-screen Voice Mode (no AppShell / sidebar) */}
             <Route path="/voice" element={<RequireAuth><VoiceMode /></RequireAuth>} />
             {/* Full-screen Flow Demo (no AppShell / sidebar) */}
             <Route path="/flow-demo" element={<RequireAuth><FlowDemo /></RequireAuth>} />
-            <Route element={<RequireAuth><RequireProfile><AppShell /></RequireProfile></RequireAuth>}>
-              <Route path="/" element={<Index />} />
-              <Route path="/pulse" element={<Pulse />} />
-              <Route path="/pulse/:id" element={<PulseArticle />} />
-              <Route path="/chat/:chatId" element={<Index />} />
-              <Route path="*" element={<NotFound />} />
+            {/* Landing page at root */}
+            <Route path="/" element={<LandingPage />} />
+            {/* Landing-specific pages */}
+            <Route path="/about" element={<LandingAbout />} />
+            <Route path="/contact" element={<LandingContact />} />
+            <Route path="/faq" element={<LandingFAQ />} />
+            <Route path="/privacy" element={<LandingPrivacy />} />
+            <Route path="/terms" element={<LandingTerms />} />
+            {/* App-specific legal pages */}
+            <Route path="/app/privacy" element={<Privacy />} />
+            <Route path="/app/terms" element={<Terms />} />
+            <Route element={<AppShell />}>
+              <Route path="/app" element={<RequireAuth><RequireProfile><Index /></RequireProfile></RequireAuth>} />
+              <Route path="/pulse" element={<RequireAuth><Pulse /></RequireAuth>} />
+              <Route path="/pulse/:id" element={<RequireAuth><PulseArticle /></RequireAuth>} />
+              <Route path="/chat/:chatId" element={<RequireAuth><RequireProfile><Index /></RequireProfile></RequireAuth>} />
             </Route>
+            {/* Ensure unknown nested segments like /chat/foo/bar or /pulse/foo go to 404 outside the shell */}
+            <Route path="/chat/*" element={<NotFound />} />
+            <Route path="/pulse/*" element={<NotFound />} />
+            {/* Global fallback for any unmatched route (outside protected shell as well) */}
+            <Route path="*" element={<NotFound />} />
           </Routes>
           )}
         </BrowserRouter>

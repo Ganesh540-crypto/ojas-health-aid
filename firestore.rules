@@ -1,8 +1,14 @@
 rules_version = '2';
 
+// COMBINED RULES - Applies to ALL Firestore databases in this project
+// Separate files exist for reference: firestore.pulse.rules & firestore.memory.rules
+
 service cloud.firestore {
   match /databases/{database}/documents {
-    // Pulse V2 collections (active)
+    
+    // ===================================================================
+    // PULSE COLLECTIONS (Database: (default) in us-central1)
+    // ===================================================================
     match /pulse_sources/{document=**} {
       allow read: if true;
       allow write: if false; // Only Cloud Functions can write
@@ -20,7 +26,18 @@ service cloud.firestore {
       allow write: if false; // Only Cloud Functions can write
     }
     
-    // Default deny for other collections
+    // ===================================================================
+    // AI MEMORY COLLECTIONS (Database: default in asia-south1)
+    // ===================================================================
+    match /vector_memories/{memoryId} {
+      allow read: if request.auth != null && request.auth.token.email_verified == true && resource.data.userId == request.auth.uid;
+      allow create: if request.auth != null && request.auth.token.email_verified == true && request.resource.data.userId == request.auth.uid;
+      allow update, delete: if request.auth != null && request.auth.token.email_verified == true && resource.data.userId == request.auth.uid;
+    }
+    
+    // ===================================================================
+    // DEFAULT DENY
+    // ===================================================================
     match /{document=**} {
       allow read, write: if false;
     }

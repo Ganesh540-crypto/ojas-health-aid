@@ -15,6 +15,7 @@ interface UseChatScrollResult {
   showScrollButton: boolean;
   isUserScrolling: boolean;
   scrollToBottom: (smooth?: boolean, force?: boolean) => void;
+  scrollToShowNewMessage: () => void;
 }
 
 const VIEWPORT_SELECTOR = '[data-radix-scroll-area-viewport]';
@@ -46,6 +47,44 @@ export const useChatScroll = ({
     },
     [isUserScrolling]
   );
+
+  // Scroll new query to top of viewport (ChatGPT/Perplexity style)
+  const scrollToShowNewMessage = useCallback(() => {
+    setTimeout(() => {
+      const viewport = getViewport(scrollAreaRef.current);
+      if (!viewport) return;
+
+      // Find all message pairs
+      const pairs = viewport.querySelectorAll('[data-message-pair]');
+      if (pairs.length === 0) return;
+
+      // Get the newest pair (last one)
+      const newestPair = pairs[pairs.length - 1] as HTMLElement;
+      const pairIndex = parseInt(newestPair.dataset.pairIndex || '0', 10);
+      
+      // Find the query heading (h1) - this is what we position at top
+      const queryHeading = newestPair.querySelector('h1') as HTMLElement;
+      if (!queryHeading) return;
+
+      // Calculate scroll position to put query at top of viewport
+      // Use getBoundingClientRect for accurate positioning
+      const viewportRect = viewport.getBoundingClientRect();
+      const queryRect = queryHeading.getBoundingClientRect();
+      
+      // Distance from viewport top to query
+      const offsetFromTop = queryRect.top - viewportRect.top;
+      
+      // Target scroll = current scroll + offset (this puts query at viewport top)
+      const targetScroll = viewport.scrollTop + offsetFromTop;
+      
+      viewport.scrollTo({ 
+        top: targetScroll,
+        behavior: 'smooth'
+      });
+      
+      setIsUserScrolling(false);
+    }, 150);
+  }, []);
 
   useEffect(() => {
     const viewport = getViewport(scrollAreaRef.current);
@@ -87,22 +126,7 @@ export const useChatScroll = ({
     };
   }, [isLoading, streamController, messages.length]);
 
-  useEffect(() => {
-    if (messages.length === 0 || isUserScrolling) return;
-    const lastMessage = messages[messages.length - 1];
-    if (!lastMessage.isBot || streamingBotId) {
-      const timer = setTimeout(() => {
-        scrollToBottom(true);
-      }, 120);
-      return () => clearTimeout(timer);
-    }
-  }, [messages, isUserScrolling, streamingBotId, scrollToBottom]);
-
-  useEffect(() => {
-    if (scrollLocked) {
-      scrollToBottom(false);
-    }
-  }, [messages, scrollLocked, scrollToBottom]);
+  // Removed auto-scroll effects - only scroll when user explicitly sends message or clicks button
 
   return {
     scrollAreaRef,
@@ -110,5 +134,6 @@ export const useChatScroll = ({
     showScrollButton,
     isUserScrolling,
     scrollToBottom,
+    scrollToShowNewMessage,
   };
 };

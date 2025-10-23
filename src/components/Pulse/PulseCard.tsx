@@ -1,150 +1,150 @@
 import React from "react";
 import { Card } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
-import { ExternalLink, Clock, Layers } from "lucide-react";
-import { formatDistanceToNow } from "date-fns";
 import type { PulseArticle } from "@/pages/Pulse";
 import { useNavigate } from "react-router-dom";
-import { Popover, PopoverTrigger, PopoverContent } from "@/components/ui/popover";
+import { formatDistanceToNow } from "date-fns";
+import { useImageFallback } from "@/hooks/useImageFallback";
+
+interface TranslatedArticle {
+  title: string;
+  summary: string;
+  lede?: string;
+}
 
 interface Props {
   article: PulseArticle;
   compact?: boolean;
+  translated?: TranslatedArticle;
+  size?: 'large' | 'small';
+  imagePosition?: 'left' | 'right';
+  index?: number;
 }
 
-const PulseCard: React.FC<Props> = ({ article, compact = false }) => {
+const PulseCard: React.FC<Props> = ({ 
+  article, 
+  compact = false, 
+  translated, 
+  size = 'small',
+  imagePosition = 'right',
+  index = 0
+}) => {
   const navigate = useNavigate();
-  const timeAgo = article.publishedAt
-    ? formatDistanceToNow(new Date(article.publishedAt), { addSuffix: true })
-    : "";
+  
+  // Use translated content if available
+  const displayTitle = translated?.title || article.title;
+  // Prefer introduction (clean intro text) over summary for preview
+  const displaySummary = translated?.summary || article.introduction || article.summary;
+  const isLarge = size === 'large';
+  
+  // Helper functions
+  const faviconUrl = (domain?: string) => domain ? `https://www.google.com/s2/favicons?sz=64&domain=${encodeURIComponent(domain)}` : undefined;
+  const timeAgo = article.publishedAt ? formatDistanceToNow(new Date(article.publishedAt), { addSuffix: true }) : null;
+  const arr = Array.isArray(article.sources) && article.sources.length > 0 ? article.sources : (article.source ? [article.source] : []);
+  const domains = Array.from(new Set(arr.filter(Boolean)));
+  const sourceCount = domains.length;
+  
+  // Image fallback handling (try source URLs if main image missing)
+  const { imageUrl: displayImage, handleImageError } = useImageFallback(article.imageUrl, article.urls);
 
-  // React 19: No useMemo needed - React Compiler optimizes automatically
-  let primaryDomain = "";
-  try {
-    if (article.source) primaryDomain = article.source.replace(/^www\./, "");
-    else if (article.url) primaryDomain = new URL(article.url).hostname.replace(/^www\./, "");
-  } catch {}
-
-  const faviconUrl = (domain?: string) =>
-    domain ? `https://www.google.com/s2/favicons?sz=32&domain=${encodeURIComponent(domain)}` : undefined;
-
-  // React 19: Direct computation - React Compiler handles optimization
-  const arr = Array.isArray(article.sources) && article.sources.length > 0
-    ? article.sources
-    : (primaryDomain ? [primaryDomain] : []);
-  const sourceDomains = Array.from(new Set(arr.filter(Boolean))).slice(0, 3);
-  const allDomains = Array.from(new Set(arr.filter(Boolean)));
-
-  const body = (
-    <>
-      {/* Image */}
-      <div className="mb-3 overflow-hidden rounded-xl bg-muted/30">
-        {article.imageUrl ? (
-          <img
-            src={article.imageUrl}
-            alt={article.title}
-            className="w-full h-40 object-cover"
-            loading="lazy"
-            onError={(e) => {
-              // hide broken image
-              (e.currentTarget as HTMLImageElement).style.display = 'none';
-            }}
-          />
-        ) : (
-          <div className="w-full h-40 flex items-center justify-center text-xs text-muted-foreground">
-            {/* No image available */}
-          </div>
-        )}
-      </div>
-
-      {/* Title */}
-      <h3 className={`font-semibold ${compact ? "text-base" : "text-lg"} leading-tight mb-2`}>
-        {article.title}
-      </h3>
-
-      {/* Summary */}
-      {!compact && (
-        <p className="text-sm text-muted-foreground mb-3 line-clamp-2 leading-relaxed">
-          {article.lede || article.summary}
-        </p>
-      )}
-
-      {/* Tags */}
-      {!compact && article.tags?.length > 0 && (
-        <div className="flex flex-wrap gap-2 mb-3">
-          {article.tags.slice(0, 4).map((t) => (
-            <Badge key={t} variant="secondary" className="text-[10px]">
-              {t.replace(/-/g, " ")}
-            </Badge>
-          ))}
-        </div>
-      )}
-
-      {/* Footer */}
-      <div className="flex items-center justify-between text-xs text-muted-foreground">
-        <div className="flex items-center gap-3">
-          {article.publishedAt && (
-            <span className="inline-flex items-center gap-1">
-              <Clock className="h-3.5 w-3.5" />
-              {timeAgo}
-            </span>
-          )}
-          <span className="inline-flex items-center gap-2">
-            <Layers className="h-3.5 w-3.5" />
-            <span className="flex items-center -space-x-1">
-              {sourceDomains.map((d, i) => (
-                <img
-                  key={`${d}-${i}`}
-                  src={faviconUrl(d)}
-                  alt={d}
-                  className="h-4 w-4 rounded ring-1 ring-white dark:ring-gray-900"
-                />
-              ))}
-            </span>
-            {allDomains.length > sourceDomains.length && (
-              <Popover>
-                <PopoverTrigger asChild>
-                  <button className="h-4 w-4 rounded-full bg-muted text-[10px] leading-none ring-1 ring-white dark:ring-gray-900 flex items-center justify-center hover:bg-muted/80">+{allDomains.length - sourceDomains.length}</button>
-                </PopoverTrigger>
-                <PopoverContent className="w-64" align="start">
-                  <div className="text-xs font-medium mb-2">All Sources ({allDomains.length})</div>
-                  <div className="space-y-2 max-h-64 overflow-y-auto">
-                    {allDomains.map((d, i) => (
-                      <div key={`${d}-${i}`} className="flex items-center gap-2 text-sm">
-                        <img src={faviconUrl(d)} alt={d} className="h-4 w-4 rounded" />
-                        <span className="truncate">{d}</span>
-                      </div>
-                    ))}
-                  </div>
-                </PopoverContent>
-              </Popover>
-            )}
-          </span>
-        </div>
-        <button
-          type="button"
-          onClick={() => navigate(`/pulse/${article.id}`)}
-          className="inline-flex items-center gap-1 text-primary hover:underline"
-        >
-          Details
-          <ExternalLink className="h-3.5 w-3.5" />
-        </button>
-      </div>
-    </>
-  );
-
-  return (
-    <>
-      <Card
-        className={`p-4 ${compact ? "hover:shadow-sm" : "hover:shadow-md"} transition-shadow cursor-pointer`}
+  if (isLarge) {
+    // Large card with horizontal layout
+    return (
+      <div
+        className="group relative overflow-hidden rounded-lg border bg-card cursor-pointer transition-all duration-300 hover:shadow-lg"
         role="button"
         tabIndex={0}
         onClick={() => navigate(`/pulse/${article.id}`)}
         onKeyDown={(e) => (e.key === 'Enter' || e.key === ' ') && navigate(`/pulse/${article.id}`)}
       >
-        {body}
-      </Card>
-    </>
+        <div className={`flex ${imagePosition === 'right' ? 'flex-row' : 'flex-row-reverse'} h-64`}>
+          {/* Image Section */}
+          {displayImage && (
+            <div className="w-2/5 overflow-hidden relative">
+              <img
+                src={displayImage}
+                alt={article.title}
+                className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-105"
+                loading="lazy"
+                onError={handleImageError}
+              />
+            </div>
+          )}
+          {/* Content Section */}
+          <div className="flex-1 p-6 flex flex-col justify-center">
+            <h3 className="text-2xl font-semibold leading-tight mb-2 transition-colors duration-300 group-hover:text-primary">
+              {displayTitle}
+            </h3>
+            {timeAgo && (
+              <p className="text-xs text-muted-foreground mb-3">{timeAgo}</p>
+            )}
+            <p className="text-sm text-muted-foreground leading-relaxed line-clamp-3 transition-colors duration-300 group-hover:text-primary/80 mb-4">
+              {displaySummary}
+            </p>
+            {/* Source icons stacked */}
+            {sourceCount > 0 && (
+              <div className="flex items-center gap-2 mt-auto">
+                <div className="flex -space-x-2">
+                  {domains.slice(0, 5).map((d, i) => (
+                    <div key={`${d}-${i}`} className="w-5 h-5 rounded-full ring-1 ring-white dark:ring-gray-900 overflow-hidden bg-white">
+                      <img src={faviconUrl(d)} alt={d} className="w-full h-full object-cover" />
+                    </div>
+                  ))}
+                </div>
+                <span className="text-[10px] text-muted-foreground font-medium">{sourceCount} sources</span>
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // Small card (original style with hover effects)
+  return (
+    <Card
+      className="group overflow-hidden cursor-pointer p-0 transition-all duration-300 hover:shadow-lg flex flex-col"
+      role="button"
+      tabIndex={0}
+      onClick={() => navigate(`/pulse/${article.id}`)}
+      onKeyDown={(e) => (e.key === 'Enter' || e.key === ' ') && navigate(`/pulse/${article.id}`)}
+    >
+      {/* Image - fills edge to edge, no rounded corners */}
+      <div className="overflow-hidden bg-muted/30 aspect-video relative">
+        {displayImage ? (
+          <img
+            src={displayImage}
+            alt={article.title}
+            className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-105"
+            loading="lazy"
+            onError={handleImageError}
+          />
+        ) : (
+          <div className="w-full h-full flex items-center justify-center text-xs text-muted-foreground bg-muted/20">
+            No image
+          </div>
+        )}
+      </div>
+
+      {/* Title and sources - with hover effect */}
+      <div className="p-3 flex flex-col flex-1">
+        <h3 className="text-sm font-normal leading-snug transition-colors duration-300 group-hover:text-primary mb-2 line-clamp-3">
+          {displayTitle}
+        </h3>
+        {/* Source count - fixed at bottom */}
+        {sourceCount > 0 && (
+          <div className="flex items-center gap-2 mt-auto pt-2">
+            <div className="flex -space-x-2">
+              {domains.slice(0, 3).map((d, i) => (
+                <div key={`${d}-${i}`} className="w-5 h-5 rounded-full ring-1 ring-white dark:ring-gray-900 overflow-hidden bg-white">
+                  <img src={faviconUrl(d)} alt={d} className="w-full h-full object-cover" />
+                </div>
+              ))}
+            </div>
+            <span className="text-[10px] text-muted-foreground">{sourceCount} sources</span>
+          </div>
+        )}
+      </div>
+    </Card>
   );
 };
 

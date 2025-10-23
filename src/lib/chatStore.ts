@@ -11,6 +11,17 @@ export interface ChatMessageItem {
   metaItems?: Array<{ type: 'step' | 'thought' | 'search_query'; text?: string; query?: string; ts?: number }>;
 }
 
+export interface PendingHealthIntake {
+  questions: Array<{
+    id: string;
+    text: string;
+    options: string[];
+    multiSelect?: boolean;
+  }>;
+  userMessage: string; // Original health query
+  createdAt: number;
+}
+
 export interface Chat {
   id: string;
   title: string;
@@ -18,9 +29,39 @@ export interface Chat {
   updatedAt: number;
   messages: ChatMessageItem[];
   ephemeral?: boolean; // true until first user message is added
+  pendingIntake?: PendingHealthIntake; // Unanswered health intake
+  // Snapshot of user context at chat creation for better personalization
+  userContext?: {
+    language?: string;
+    location?: string;
+    interests?: string[];
+    pulseTopics?: string[];
+  };
 }
 
-const LS_KEY = 'ojas.chats.v1';
+const LS_BASE = 'ojas.chats.v1';
+// Build a per-user key for localStorage to avoid cross-account leakage
+function getUserKey(): string {
+  try {
+    // auth is imported below; ES modules hoist imports, safe to reference here
+    // Fallback to 'nouser' for pre-auth states
+    // eslint-disable-next-line @typescript-eslint/no-use-before-define
+    const uid = auth?.currentUser?.uid || 'nouser';
+    return `${LS_BASE}.${uid}`;
+  } catch {
+    return `${LS_BASE}.nouser`;
+  }
+}
+
+function ephemeralKey(id: string): string {
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-use-before-define
+    const uid = auth?.currentUser?.uid || 'nouser';
+    return `ojas.ephemeral.${uid}.${id}`;
+  } catch {
+    return `ojas.ephemeral.nouser.${id}`;
+  }
+}
 
 // In-memory cache for ephemeral (unsaved) chats until first user message
 const ephemeralCache: Record<string, Chat> = {};
@@ -28,7 +69,19 @@ const ephemeralCache: Record<string, Chat> = {};
 // Attempt to restore an ephemeral chat from sessionStorage (survives refresh)
 function restoreEphemeral(id: string): Chat | undefined {
   try {
-    const raw = sessionStorage.getItem(`ojas.ephemeral.${id}`);
+    let raw = sessionStorage.getItem(ephemeralKey(id));
+    if (!raw) {
+      // Fallback: scan for any ephemeral key suffix matching this id (handles auth timing)
+      try {
+        for (let i = 0; i < sessionStorage.length; i++) {
+          const k = sessionStorage.key(i) || '';
+          if (k.startsWith('ojas.ephemeral.') && k.endsWith(`.${id}`)) {
+            raw = sessionStorage.getItem(k);
+            if (raw) break;
+          }
+        }
+      } catch {}
+    }
     if (!raw) return undefined;
     const chat = JSON.parse(raw) as Chat;
     ephemeralCache[id] = chat;
@@ -40,7 +93,7 @@ function restoreEphemeral(id: string): Chat | undefined {
 
 function loadAll(): Chat[] {
   try {
-    const raw = localStorage.getItem(LS_KEY);
+    const raw = localStorage.getItem(getUserKey());
     if (!raw) return [];
   const parsed = JSON.parse(raw);
     if (!Array.isArray(parsed)) return [];
@@ -48,7 +101,7 @@ function loadAll(): Chat[] {
     const cleaned: Chat[] = [];
     for (const item of parsed) {
       if (!item || typeof item !== 'object') continue;
-      const { id, title, createdAt, updatedAt, messages, ephemeral } = item as Partial<Chat> & { messages?: unknown };
+      const { id, title, createdAt, updatedAt, messages, ephemeral, pendingIntake } = item as Partial<Chat> & { messages?: unknown };
       if (typeof id !== 'string') continue;
       type RawMessage = {
         id?: unknown;
@@ -116,14 +169,28 @@ function loadAll(): Chat[] {
           }
           return base;
         });
-      cleaned.push({
+      const chatObj: Chat = {
         id,
         title: typeof title === 'string' ? title : 'Untitled',
         createdAt: typeof createdAt === 'number' ? createdAt : Date.now(),
         updatedAt: typeof updatedAt === 'number' ? updatedAt : Date.now(),
         messages: safeMessages,
         ephemeral: !!ephemeral
-      });
+      };
+      
+      // Preserve pendingIntake if present
+      if (pendingIntake && typeof pendingIntake === 'object') {
+        const pi = pendingIntake as any;
+        if (Array.isArray(pi.questions) && typeof pi.createdAt === 'number') {
+          chatObj.pendingIntake = {
+            questions: pi.questions,
+            userMessage: typeof pi.userMessage === 'string' ? pi.userMessage : '',
+            createdAt: pi.createdAt
+          };
+        }
+      }
+      
+      cleaned.push(chatObj);
     }
     return cleaned;
   } catch {
@@ -132,10 +199,17 @@ function loadAll(): Chat[] {
 }
 
 function saveAll(chats: Chat[]) {
-  localStorage.setItem(LS_KEY, JSON.stringify(chats));
+  const hasPendingIntake = chats.some(c => c.pendingIntake);
+  console.log('💾 saveAll to localStorage:', { 
+    numChats: chats.length, 
+    hasPendingIntake,
+    pendingIntakeChatIds: chats.filter(c => c.pendingIntake).map(c => c.id)
+  });
+  localStorage.setItem(getUserKey(), JSON.stringify(chats));
 }
 
 import { auth, db, storage } from './firebase';
+import { profileStore } from './profileStore';
 import { ref, set, get, child } from 'firebase/database';
 import { ref as storageRef, uploadBytes, getDownloadURL } from 'firebase/storage';
 
@@ -195,13 +269,16 @@ export const chatStore = {
     }
     try {
       const local = loadAll();
+      const hasPendingIntake = local.some(c => c.pendingIntake);
       console.log('☁️ Pushing to Firebase:', { 
         numChats: local.length,
-        hasMetaItems: local.some(c => c.messages.some(m => m.metaItems && m.metaItems.length > 0))
+        hasMetaItems: local.some(c => c.messages.some(m => m.metaItems && m.metaItems.length > 0)),
+        hasPendingIntake,
+        pendingIntakeChatIds: local.filter(c => c.pendingIntake).map(c => c.id)
       });
       const cleaned = stripUndefinedDeep(local);
       await set(ref(db, `users/${user.uid}/chats`), cleaned);
-      console.log('✅ Successfully pushed to Firebase');
+      console.log('✅ Successfully pushed to Firebase (pendingIntake included:', hasPendingIntake, ')');
     } catch (err) {
       console.error('❌ pushToCloud failed:', err);
     }
@@ -229,9 +306,15 @@ export const chatStore = {
   create(): Chat {
     const id = crypto.randomUUID();
     const now = Date.now();
-    const chat: Chat = { id, title: 'New Chat', createdAt: now, updatedAt: now, messages: [], ephemeral: true };
+    const p = profileStore.get();
+    const chat: Chat = { id, title: 'New Chat', createdAt: now, updatedAt: now, messages: [], ephemeral: true, userContext: {
+      language: p.language,
+      location: p.location,
+      interests: p.interests,
+      pulseTopics: p.pulseTopics,
+    } };
     ephemeralCache[id] = chat; // not persisted yet
-  try { sessionStorage.setItem(`ojas.ephemeral.${id}`, JSON.stringify(chat)); } catch (err) { /* ignore sessionStorage failure */ }
+  try { sessionStorage.setItem(ephemeralKey(id), JSON.stringify(chat)); } catch (err) { /* ignore sessionStorage failure */ }
     window.dispatchEvent(new Event('ojas-chats-changed'));
     return chat;
   },
@@ -261,7 +344,11 @@ export const chatStore = {
   addMessage(id: string, role: ChatMessageRole, content: string, attachments?: Array<{ url: string; name: string; type: string; size: number }>): Chat | undefined {
   const chats = loadAll();
   const chat = ephemeralCache[id] || chats.find(c => c.id === id);
-    if (!chat) return undefined;
+    if (!chat) {
+      console.error('❌ [chatStore] Chat not found for addMessage:', id, '| Available chats:', chats.map(c => c.id));
+      return undefined;
+    }
+    console.log('✅ [chatStore] Adding message:', { chatId: id, role, contentLength: content.length, isEphemeral: chat.ephemeral });
   const msg: ChatMessageItem = { 
       id: crypto.randomUUID(), 
       role, 
@@ -270,14 +357,17 @@ export const chatStore = {
       ...(attachments ? { attachments } : {})
     };
     chat.messages.push(msg);
+    console.log('📨 [chatStore] Message pushed to chat.messages array. Total messages:', chat.messages.length);
     if (chat.ephemeral && role === 'user') {
       // Persist this previously ephemeral chat now
+      console.log('🔄 [chatStore] Converting ephemeral chat to persistent (first user message)');
       chat.ephemeral = false;
       chats.push(chat);
       saveAll(chats);
       this.pushToCloud();
       delete ephemeralCache[id];
-  try { sessionStorage.removeItem(`ojas.ephemeral.${id}`); } catch (err) { /* ignore */ }
+  try { sessionStorage.removeItem(ephemeralKey(id)); } catch (err) { /* ignore */ }
+      console.log('✅ [chatStore] Chat persisted with', chat.messages.length, 'messages');
     }
     // Generate smart title on first user message
     if (chat.title === 'New Chat' && role === 'user') {
@@ -311,7 +401,7 @@ export const chatStore = {
     if (chat.ephemeral) {
       chat.ephemeral = false;
       chats.push(chat);
-      try { sessionStorage.removeItem(`ojas.ephemeral.${id}`); } catch (err) { /* ignore */ }
+      try { sessionStorage.removeItem(ephemeralKey(id)); } catch (err) { /* ignore */ }
     }
     // Title: prefer first user message; fallback to assistant snippet
     if (chat.title === 'New Chat') {
@@ -343,10 +433,8 @@ export const chatStore = {
     
     chat.updatedAt = Date.now();
     saveAll(chats);
-    // Push to cloud when sources are present to ensure they persist
-    if (msg.sources && msg.sources.length > 0) {
-      this.pushToCloud();
-    }
+    // Always push to cloud so content isn't lost on refresh
+    this.pushToCloud();
   },
   updateMessageSources(chatId: string, messageId: string, sources: Array<{ title: string; url: string; snippet?: string; displayUrl?: string }>) {
     const chats = loadAll();
@@ -354,7 +442,28 @@ export const chatStore = {
     if (!chat) return;
     const msg = chat.messages.find(m => m.id === messageId);
     if (!msg) return;
-    msg.sources = sources;
+    const normalize = (arr: Array<{ title?: any; url?: any; snippet?: any; displayUrl?: any }>): Array<{ title: string; url: string; snippet?: string; displayUrl?: string }> => {
+      const seen = new Set<string>();
+      const out: Array<{ title: string; url: string; snippet?: string; displayUrl?: string }> = [];
+      for (const s of Array.isArray(arr) ? arr : []) {
+        if (!s || typeof s.url !== 'string') continue;
+        const url = String(s.url).trim();
+        if (!url) continue;
+        if (seen.has(url)) continue;
+        seen.add(url);
+        let displayUrl: string | undefined;
+        if (typeof s.displayUrl === 'string' && s.displayUrl.trim()) {
+          displayUrl = s.displayUrl.trim();
+        } else {
+          try { displayUrl = new URL(url.startsWith('http') ? url : `https://${url}`).hostname.replace(/^www\./, ''); } catch {}
+        }
+        const title = (typeof s.title === 'string' && s.title.trim()) ? s.title : 'Web Source';
+        const snippet = (typeof s.snippet === 'string' && s.snippet) ? s.snippet : undefined;
+        out.push({ title, url, snippet, displayUrl });
+      }
+      return out;
+    };
+    msg.sources = normalize(sources);
     chat.updatedAt = Date.now();
     saveAll(chats);
     this.pushToCloud();
@@ -381,6 +490,68 @@ export const chatStore = {
     this.pushToCloud();
     window.dispatchEvent(new Event('ojas-chats-changed'));
   },
+  // Set pending health intake questions (survives refresh)
+  setPendingIntake(chatId: string, intake: PendingHealthIntake) {
+    let chats = loadAll();
+    let chat = ephemeralCache[chatId] || chats.find(c => c.id === chatId);
+    if (!chat) {
+      console.warn('⚠️ Chat not found for setPendingIntake:', chatId);
+      return;
+    }
+    
+    console.log('📝 Setting pending intake for chat:', chatId, 'ephemeral:', chat.ephemeral);
+    chat.pendingIntake = intake;
+    chat.updatedAt = Date.now();
+    
+    if (!chat.ephemeral) {
+      // Chat is persisted - save to localStorage and Firebase
+      // Ensure the updated chat is in the array
+      chats = chats.map(c => c.id === chatId ? chat : c);
+      saveAll(chats);
+      console.log('✅ Saved pendingIntake to localStorage, pushing to cloud...');
+      this.pushToCloud();
+    } else {
+      // Save ephemeral to sessionStorage
+      ephemeralCache[chatId] = chat;
+      try {
+        sessionStorage.setItem(ephemeralKey(chatId), JSON.stringify(chat));
+        console.log('✅ Saved ephemeral pendingIntake to sessionStorage');
+      } catch (e) {
+        console.error('❌ Failed to save to sessionStorage:', e);
+      }
+    }
+    window.dispatchEvent(new Event('ojas-chats-changed'));
+  },
+  
+  // Clear pending intake after user answers
+  clearPendingIntake(chatId: string) {
+    let chats = loadAll();
+    let chat = ephemeralCache[chatId] || chats.find(c => c.id === chatId);
+    if (!chat) {
+      console.warn('⚠️ Chat not found for clearPendingIntake:', chatId);
+      return;
+    }
+    
+    console.log('🗑️ Clearing pending intake for chat:', chatId);
+    delete chat.pendingIntake;
+    chat.updatedAt = Date.now();
+    
+    if (!chat.ephemeral) {
+      // Ensure the updated chat is in the array
+      chats = chats.map(c => c.id === chatId ? chat : c);
+      saveAll(chats);
+      console.log('✅ Cleared pendingIntake from localStorage, pushing to cloud...');
+      this.pushToCloud();
+    } else {
+      ephemeralCache[chatId] = chat;
+      try {
+        sessionStorage.setItem(ephemeralKey(chatId), JSON.stringify(chat));
+        console.log('✅ Cleared ephemeral pendingIntake from sessionStorage');
+      } catch {}
+    }
+    window.dispatchEvent(new Event('ojas-chats-changed'));
+  },
+  
   rename(id: string, title: string): Chat | undefined {
     const chats = loadAll();
     const chat = chats.find(c => c.id === id);

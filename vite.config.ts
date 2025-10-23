@@ -58,6 +58,8 @@ export default defineConfig(({ mode }) => {
       port: 8080,
     },
     plugins: [
+      // React 19.2: SWC provides automatic optimizations
+      // Automatic batching, concurrent rendering, and optimizations built-in
       react(),
       mode === 'development' && componentTagger(),
       mode === 'development' && ephemeralTokenPlugin(),
@@ -66,6 +68,27 @@ export default defineConfig(({ mode }) => {
       alias: {
         "@": path.resolve(__dirname, "./src"),
       },
+    },
+    // React 19.2 Performance optimizations
+    build: {
+      target: 'esnext',
+      minify: 'esbuild',
+      cssMinify: true,
+      rollupOptions: {
+        output: {
+          manualChunks: {
+            'react-vendor': ['react', 'react-dom', 'react-router-dom'],
+            'ui-vendor': ['@radix-ui/react-dialog', '@radix-ui/react-dropdown-menu', '@radix-ui/react-popover'],
+            'firebase': ['firebase/app', 'firebase/auth', 'firebase/firestore'],
+          }
+        }
+      }
+    },
+    optimizeDeps: {
+      include: ['react', 'react-dom', 'react-router-dom'],
+      esbuildOptions: {
+        target: 'esnext',
+      }
     },
   };
 });

@@ -6,7 +6,9 @@ import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { Separator } from '@/components/ui/separator';
 import { ArrowLeftRight } from 'lucide-react';
-import { loginWithEmail, loginWithGoogle, sendReset, signupWithEmail } from '@/lib/auth';
+import { loginWithEmail, loginWithGoogle, sendReset, signupWithEmail, startEmailOtp, verifyEmailOtp } from '@/lib/auth';
+import { auth, db } from '@/lib/firebase';
+import { ref as dbRef, get as dbGet, child as dbChild } from 'firebase/database';
 
 type Mode = 'login' | 'signup';
 
@@ -21,6 +23,10 @@ export default function Auth({ initialMode }: { initialMode?: Mode }) {
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [verifying, setVerifying] = useState(false);
+  const [otpMode, setOtpMode] = useState<'idle'|'otp'|'link'>('idle');
+  const [otpCode, setOtpCode] = useState('');
+  const [otpInfo, setOtpInfo] = useState<string | null>(null);
 
   const toggle = () => {
     const nextMode: Mode = mode === 'signup' ? 'login' : 'signup';
@@ -29,9 +35,20 @@ export default function Auth({ initialMode }: { initialMode?: Mode }) {
     navigate(nextMode === 'signup' ? '/signup' : '/login', { replace: true });
   };
 
+  const navigateAfterAuth = async () => {
+    try {
+      const u = auth.currentUser; if (!u) { navigate('/login', { replace: true }); return; }
+      const snap = await dbGet(dbChild(dbRef(db), `users/${u.uid}/profile`));
+      if (snap.exists()) navigate('/app', { replace: true }); else navigate('/onboarding', { replace: true });
+    } catch {
+      // If the check fails, fall back to onboarding; RequireProfile will route appropriately
+      navigate('/onboarding', { replace: true });
+    }
+  };
+
   const onGoogle = async () => {
     setLoading(true); setError(null);
-    try { await loginWithGoogle(); navigate('/onboarding'); } catch (e: unknown) { const msg = (e as { message?: string })?.message || 'Google sign-in failed'; setError(msg); } finally { setLoading(false); }
+    try { await loginWithGoogle(); await navigateAfterAuth(); } catch (e: unknown) { const msg = (e as { message?: string })?.message || 'Google sign-in failed'; setError(msg); } finally { setLoading(false); }
   };
 
   const onSubmit = async (e: React.FormEvent) => {
@@ -39,11 +56,19 @@ export default function Auth({ initialMode }: { initialMode?: Mode }) {
     try {
       if (mode === 'signup') {
         await signupWithEmail(email, password, name);
+        try { await startEmailOtp(email); } catch {}
+        navigate('/verify-email', { replace: true, state: { email } });
+        return;
       } else {
         await loginWithEmail(email, password);
       }
-      navigate('/onboarding');
+      await navigateAfterAuth();
     } catch (err: unknown) {
+      const code = (err as any)?.code || '';
+      if (code === 'auth/email-not-verified') {
+        navigate('/verify-email', { replace: true, state: { email } });
+        return;
+      }
       const msg = (err as { message?: string })?.message || 'Authentication failed';
       setError(msg);
     } finally { setLoading(false); }
@@ -122,6 +147,8 @@ export default function Auth({ initialMode }: { initialMode?: Mode }) {
                 </div>
                 <Button className="w-full" disabled={loading} type="submit">{submitLabel}</Button>
               </form>
+
+              {/* Verification UI moved to dedicated /verify-email page */}
               <div className="flex items-center gap-2"><Separator className="flex-1" /><span className="text-xs text-muted-foreground">OR</span><Separator className="flex-1" /></div>
               <Button variant="outline" className="w-full" type="button" onClick={onGoogle}>Continue with Google</Button>
               {mode === 'signup' ? (

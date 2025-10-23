@@ -1,0 +1,140 @@
+LEVEL  NAME                 EXECUTION_ID  TIME_UTC                 LOG
+       autonomous-research  p6bjfta7r5xq  2025-10-13 13:34:12.552  [autonomousResearch] WARNING: No topics discovered - exiting
+       autonomous-research  p6bjfta7r5xq  2025-10-13 13:34:12.552  [autonomousResearch] Topics discovered: 0
+       autonomous-research  p6bjfta7r5xq  2025-10-13 13:34:12.552  [autonomousResearch] Discovery completed in 54534ms
+       autonomous-research  p6bjfta7r5xq  2025-10-13 13:34:12.552  [discoverTopicsForCategory:health] Full response: {
+                                                                     "sdkHttpResponse": {
+                                                                       "headers": {
+                                                                         "alt-svc": "h3=\":443\"; ma=2592000,h3-29=\":443\"; ma=2592000",
+                                                                         "content-encoding": "gzip",
+                                                                         "content-type": "application/json; charset=UTF-8",
+                                                                         "date": "Mon, 13 Oct 2025 13:34:12 GMT",
+                                                                         "server": "scaffolding on HTTPServer2",
+                                                                         "server-timing": "gfet4t7; dur=52331",
+                                                                         "transfer-encoding": "chunked",
+                                                                         "vary": "Origin, X-Origin, Referer",
+                                                                         "x-content-type-options": "nosniff",
+                                                                         "x-frame-options": "SAMEORIGIN",
+                                                                         "x-xss-protection": "0"
+                                                                       }
+                                                                     },
+                                                                     "candidates": [
+                                                                       {
+                                                                         "content": {
+                                                                           "role": "model"
+                                                                         },
+                                                                         "finishReason": "MAX_TOKENS",
+                                                                         "index": 0
+                                                                       }
+                                                                     ],
+                                                                     "modelVersion": "gemini-2.5-flash",
+                                                                     "responseId": "1P_saN_NIIS-_uMP0-XL-Qo",
+                                                                     "usageMetadata": {
+                                                                       "promptTokenCount": 1488,
+                                                                       "totalTokenCount": 9679,
+                                                                       "promptTokensDetails": [
+                                                                         {
+                                                                           "modality": "TEXT",
+                                                                           "tokenCount": 1488
+                                                                         }
+                                                                       ],
+                                                                       "thoughtsTokenCount": 8191
+                                                                     }
+                                                                   }
+       autonomous-research  p6bjfta7r5xq  2025-10-13 13:34:12.552  [discoverTopicsForCategory:health] ERROR: Empty extraction response
+       autonomous-research  p6bjfta7r5xq  2025-10-13 13:34:12.551  [discoverTopicsForCategory:health] Extraction response keys: [
+                                                                     'sdkHttpResponse',
+                                                                     'candidates',
+                                                                     'modelVersion',
+                                                                     'responseId',
+                                                                     'usageMetadata'
+                                                                   ]
+       autonomous-research  p6bjfta7r5xq  2025-10-13 13:33:20.197  [discoverTopicsForCategory:health] Extraction prompt length: 5784 chars
+       autonomous-research  p6bjfta7r5xq  2025-10-13 13:33:20.196  [discoverTopicsForCategory:health] Step 4: Extracting topics from search results...
+       autonomous-research  p6bjfta7r5xq  2025-10-13 13:33:20.196  [discoverTopicsForCategory:health] Sample result: {
+                                                                     "title": "UG Medical Counselling | Medical Counselling Committee (MCC ...",
+                                                                     "snippet": "LATEST NEWS ? Resignation facility has been extended till 05:00 P.M of 11.10. ? PwD potal for generation of PwD certificate for Round 3 of UG Counselling 2025 is?...",
+                                                                     "url": "https://mcc.nic.in/ug-medical-counselling/"
+                                                                   }
+       autonomous-research  p6bjfta7r5xq  2025-10-13 13:33:20.196  [discoverTopicsForCategory:health] Step 3: Total search results collected: 30
+       autonomous-research  p6bjfta7r5xq  2025-10-13 13:33:20.196  [discoverTopicsForCategory:health] Step 3: Got 30 search results (parallelized)
+       autonomous-research  p6bjfta7r5xq  2025-10-13 13:33:20.195  [searchWithGoogleCSE]   - Mayo Clinic News Network: Homepage... (newsnetwork.mayoclinic.org)
+       autonomous-research  p6bjfta7r5xq  2025-10-13 13:33:20.195  [searchWithGoogleCSE]   - Office of Public Affairs | National Health Care Fraud Takedo... (justice.gov)
+       autonomous-research  p6bjfta7r5xq  2025-10-13 13:33:20.195  [searchWithGoogleCSE]   - Breaking News: WHA Resolution on Rare Diseases Adopted - Rar... (rarediseasesinternational.org)
+       autonomous-research  p6bjfta7r5xq  2025-10-13 13:33:20.195  [searchWithGoogleCSE]   - Health & Medicine News -- ScienceDaily... (sciencedaily.com)
+       autonomous-research  p6bjfta7r5xq  2025-10-13 13:33:20.195  [searchWithGoogleCSE]   - H5 Bird Flu: Current Situation | Bird Flu | CDC... (cdc.gov)
+       autonomous-research  p6bjfta7r5xq  2025-10-13 13:33:20.195  [searchWithGoogleCSE]   - News & Events | National Institutes of Health (NIH)... (nih.gov)
+       autonomous-research  p6bjfta7r5xq  2025-10-13 13:33:20.195  [searchWithGoogleCSE]   - Medical News Today... (medicalnewstoday.com)
+       autonomous-research  p6bjfta7r5xq  2025-10-13 13:33:20.194  [searchWithGoogleCSE]   - Health system at breaking point as hostilities further inten... (who.int)
+       autonomous-research  p6bjfta7r5xq  2025-10-13 13:33:20.194  [searchWithGoogleCSE]   - Medical News... (news-medical.net)
+       autonomous-research  p6bjfta7r5xq  2025-10-13 13:33:20.194  [searchWithGoogleCSE]   - Latest Medical News, Clinical Trials, Guidelines - Today on ... (medscape.com)
+       autonomous-research  p6bjfta7r5xq  2025-10-13 13:33:20.194  [searchWithGoogleCSE] Found 10 results
+       autonomous-research  p6bjfta7r5xq  2025-10-13 13:33:20.083  [searchWithGoogleCSE]   - News and Press Releases | Oracle News... (oracle.com)
+       autonomous-research  p6bjfta7r5xq  2025-10-13 13:33:20.083  [searchWithGoogleCSE]   - What's new | European Medicines Agency (EMA)... (ema.europa.eu)
+       autonomous-research  p6bjfta7r5xq  2025-10-13 13:33:20.083  [searchWithGoogleCSE]   - Medical News... (news-medical.net)
+       autonomous-research  p6bjfta7r5xq  2025-10-13 13:33:20.083  [searchWithGoogleCSE]   - Medicines and Healthcare products Regulatory Agency - GOV.UK... (gov.uk)
+       autonomous-research  p6bjfta7r5xq  2025-10-13 13:33:20.083  [searchWithGoogleCSE]   - European Medicines Agency... (ema.europa.eu)
+       autonomous-research  p6bjfta7r5xq  2025-10-13 13:33:20.083  [searchWithGoogleCSE]   - Latest Medical News, Clinical Trials, Guidelines - Today on ... (medscape.com)
+       autonomous-research  p6bjfta7r5xq  2025-10-13 13:33:20.083  [searchWithGoogleCSE]   - 10 October is World Mental Health Day... (who.int)
+       autonomous-research  p6bjfta7r5xq  2025-10-13 13:33:20.083  [searchWithGoogleCSE]   - Eradicate Polio Now | Global Polio Eradication | GPEI Home... (polioeradication.org)
+       autonomous-research  p6bjfta7r5xq  2025-10-13 13:33:20.083  [searchWithGoogleCSE]   - World Health Organization (WHO)... (who.int)
+       autonomous-research  p6bjfta7r5xq  2025-10-13 13:33:20.083  [searchWithGoogleCSE]   - UG Medical Counselling | Medical Counselling Committee (MCC ... (mcc.nic.in)
+       autonomous-research  p6bjfta7r5xq  2025-10-13 13:33:20.082  [searchWithGoogleCSE] Found 10 results
+       autonomous-research  p6bjfta7r5xq  2025-10-13 13:33:20.025  [searchWithGoogleCSE]   - Medical News | Medical Articles... (news-medical.net)
+       autonomous-research  p6bjfta7r5xq  2025-10-13 13:33:20.025  [searchWithGoogleCSE]   - Health & Pharma News | Latest Healthcare Stories | Reuters... (reuters.com)
+       autonomous-research  p6bjfta7r5xq  2025-10-13 13:33:20.025  [searchWithGoogleCSE]   - WebMD Health News Center - The latest breaking health news a... (webmd.com)
+       autonomous-research  p6bjfta7r5xq  2025-10-13 13:33:20.025  [searchWithGoogleCSE]   - Health | Latest News & Updates | BBC News... (bbc.co.uk)
+       autonomous-research  p6bjfta7r5xq  2025-10-13 13:33:20.025  [searchWithGoogleCSE]   - Health | Latest News & Updates | BBC News... (bbc.com)
+       autonomous-research  p6bjfta7r5xq  2025-10-13 13:33:20.024  [searchWithGoogleCSE]   - Latest Medical News, Clinical Trials, Guidelines - Today on ... (medscape.com)
+       autonomous-research  p6bjfta7r5xq  2025-10-13 13:33:20.024  [searchWithGoogleCSE]   - Healthcare News | Health Industry News | Health Sector News... (health.economictimes.indiatimes.com)
+       autonomous-research  p6bjfta7r5xq  2025-10-13 13:33:20.024  [searchWithGoogleCSE]   - News... (who.int)
+       autonomous-research  p6bjfta7r5xq  2025-10-13 13:33:20.024  [searchWithGoogleCSE]   - Medical News Today... (medicalnewstoday.com)
+       autonomous-research  p6bjfta7r5xq  2025-10-13 13:33:20.024  [searchWithGoogleCSE]   - Health News, Wellbeing Tips, Diseases, Treatment and Nutriti... (thehindu.com)
+       autonomous-research  p6bjfta7r5xq  2025-10-13 13:33:20.024  [searchWithGoogleCSE] Found 10 results
+       autonomous-research  p6bjfta7r5xq  2025-10-13 13:33:19.644  [searchWithGoogleCSE] Searching for: "health breaking news IN 2025" (region: IN)
+       autonomous-research  p6bjfta7r5xq  2025-10-13 13:33:19.638  [searchWithGoogleCSE] Searching for: "today health news IN" (region: IN)
+       autonomous-research  p6bjfta7r5xq  2025-10-13 13:33:19.577  [searchWithGoogleCSE] Searching for: "latest health news IN October 2025" (region: IN)
+       autonomous-research  p6bjfta7r5xq  2025-10-13 13:33:19.576  [discoverTopicsForCategory:health]   [3] Searching: "health breaking news IN 2025"
+       autonomous-research  p6bjfta7r5xq  2025-10-13 13:33:19.576  [discoverTopicsForCategory:health]   [2] Searching: "today health news IN"
+       autonomous-research  p6bjfta7r5xq  2025-10-13 13:33:19.576  [discoverTopicsForCategory:health]   [1] Searching: "latest health news IN October 2025"
+       autonomous-research  p6bjfta7r5xq  2025-10-13 13:33:19.576  [discoverTopicsForCategory:health] Executing 3 searches in PARALLEL...
+       autonomous-research  p6bjfta7r5xq  2025-10-13 13:33:19.576  [discoverTopicsForCategory:health] Step 2: Executing 3 search queries...
+       autonomous-research  p6bjfta7r5xq  2025-10-13 13:33:19.576  [discoverTopicsForCategory:health] First call: {
+                                                                     "args": {
+                                                                       "maxResults": 10,
+                                                                       "query": "latest health news IN October 2025"
+                                                                     },
+                                                                     "name": "google_cse_search"
+                                                                   }
+       autonomous-research  p6bjfta7r5xq  2025-10-13 13:33:19.576  [discoverTopicsForCategory:health] Function calls found: 3
+       autonomous-research  p6bjfta7r5xq  2025-10-13 13:33:19.575  [discoverTopicsForCategory:health] Response received: {
+                                                                     "sdkHttpResponse": {
+                                                                       "headers": {
+                                                                         "alt-svc": "h3=\":443\"; ma=2592000,h3-29=\":443\"; ma=2592000",
+                                                                         "content-encoding": "gzip",
+                                                                         "content-type": "application/json; charset=UTF-8",
+                                                                         "date": "Mon, 13 Oct 2025 13:33:19 GMT",
+                                                                         "server": "scaffolding on HTTPServer2",
+                                                                         "server-timing": "gfet4t7; dur=1351",
+                                                                         "transfer-encoding": "chunked",
+                                                                         "vary": "Origin, X-Origin, Referer",
+                                                                         "x-content-type-options": "nosniff",
+                                                                         "x-frame-options": "SAMEORIGI
+       autonomous-research  p6bjfta7r5xq  2025-10-13 13:33:18.088  [discoverTopicsForCategory:health] Prompt length: 678 chars
+       autonomous-research  p6bjfta7r5xq  2025-10-13 13:33:18.088  [discoverTopicsForCategory:health] Step 1: Asking Gemini to search web...
+       autonomous-research  p6bjfta7r5xq  2025-10-13 13:33:18.087  [discoverTopicsForCategory:health] Category: health, Region: IN, NumQueries: 3
+       autonomous-research  p6bjfta7r5xq  2025-10-13 13:33:18.087  [discoverTopicsForCategory:health] ========== START ==========
+       autonomous-research  p6bjfta7r5xq  2025-10-13 13:33:18.017  [autonomousResearch] Calling discovery function...
+       autonomous-research  p6bjfta7r5xq  2025-10-13 13:33:18.017  [autonomousResearch] Starting topic discovery...
+       autonomous-research  p6bjfta7r5xq  2025-10-13 13:33:18.017    NumQueries: 3
+       autonomous-research  p6bjfta7r5xq  2025-10-13 13:33:18.016    Region: IN
+       autonomous-research  p6bjfta7r5xq  2025-10-13 13:33:18.016    Category: health
+       autonomous-research  p6bjfta7r5xq  2025-10-13 13:33:18.016  [autonomousResearch] Parameters:
+       autonomous-research  p6bjfta7r5xq  2025-10-13 13:33:18.016    GOOGLE_SEARCH_ENGINE_ID: SET (748584bebb02646c9)
+       autonomous-research  p6bjfta7r5xq  2025-10-13 13:33:18.016    GOOGLE_SEARCH_API_KEY: SET (AIzaSyBl0p...)
+       autonomous-research  p6bjfta7r5xq  2025-10-13 13:33:18.016    GEMINI_API_KEY: SET (AIzaSyCgpM...)
+       autonomous-research  p6bjfta7r5xq  2025-10-13 13:33:18.015  [autonomousResearch] Environment check:
+       autonomous-research  p6bjfta7r5xq  2025-10-13 13:33:18.015  [autonomousResearch] Query params: {"category":"health","region":"IN","numQueries":"3"}
+       autonomous-research  p6bjfta7r5xq  2025-10-13 13:33:18.015  [autonomousResearch] Timestamp: 2025-10-13T13:33:18.001Z
+       autonomous-research  p6bjfta7r5xq  2025-10-13 13:33:17.999  [autonomousResearch] ===== REQUEST START =====
+       autonomous-research  p6bjfta7r5xq  2025-10-13 13:33:17.999  ========================================

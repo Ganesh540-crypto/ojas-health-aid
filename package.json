@@ -10,7 +10,8 @@
     "lint": "eslint .",
     "preview": "vite preview",
     "smoke": "tsx scripts/smoke.ts",
-    "dev:bot": "tsx server/index.ts"
+    "dev:bot": "tsx server/index.ts",
+    "typecheck": "tsc --noEmit"
   },
   "dependencies": {
     "@dhaiwat10/react-link-preview": "^1.15.0",

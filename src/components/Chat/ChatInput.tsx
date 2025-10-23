@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState, useRef } from "react";
 import { useNavigate } from "react-router-dom";
-import { Send, Paperclip, Loader2 } from "lucide-react";
+import { Send, Paperclip, Square } from "lucide-react";
 import { Button } from "@/components/ui/button";
 // Using native textarea to avoid framework ring/offset styles
 import { FilePreview } from "./FilePreview";
@@ -113,7 +113,6 @@ const ChatInput = ({ onSendMessage, isLoading, editMessage, onCancelEdit, showEx
                   }}
                   placeholder={placeholder}
                   className="w-full min-h-[48px] max-h-[200px] pr-28 pl-4 py-3 resize-none rounded-2xl bg-background shadow-[0_4px_32px_rgba(0,0,0,0.16)] border border-[hsl(var(--border)/.06)] focus:border-orange-500 outline-none focus:outline-none ring-0 focus:ring-0 focus-visible:ring-0 ring-offset-0 focus-visible:ring-offset-0 text-[15px] leading-relaxed"
-                  disabled={isLoading}
                 />
                 <div className="pointer-events-auto absolute right-3 top-1/2 -translate-y-1/2 flex items-center gap-1">
                 <input
@@ -141,8 +140,9 @@ const ChatInput = ({ onSendMessage, isLoading, editMessage, onCancelEdit, showEx
                     variant="destructive"
                     onClick={onStopGeneration}
                     className="h-8 w-8"
+                    title="Stop generation"
                   >
-                    <Loader2 className="h-4 w-4 animate-spin" />
+                    <Square className="h-3.5 w-3.5 fill-current" />
                   </Button>
                 ) : (
                   message.trim().length === 0 ? (

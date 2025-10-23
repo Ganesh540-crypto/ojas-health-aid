@@ -3,10 +3,13 @@ import { geminiLiteService } from './geminiLite';
 import { geminiSearchService } from './geminiSearch';
 import { healthIntakeService, type HealthIntakePayload } from './healthIntake';
 import { memoryStore } from './memory';
-import { isSubstanceQuery, sanitizeSubstanceContent, needsFreshData } from './textAnalysis';
+import { enhancedMemoryStore } from './memoryEnhanced';
+import { executeMemoryExtraction } from './aiMemoryExtractor';
+import { isSubstanceQuery, sanitizeSubstanceContent, needsFreshData, getHealthConfidence, isHealthRelated } from './textAnalysis';
 import { profileStore } from './profileStore';
 import { languageStore } from './languageStore';
 import { azureTranslator } from './azureTranslator';
+import { auth } from './firebase';
 const API_KEY: string = (import.meta.env?.VITE_GEMINI_API_KEY as string) || '';
 
 type Decision = 'casual' | 'critical';
@@ -35,11 +38,12 @@ class AIRouter {
     this.ai = new GoogleGenAI({ apiKey: API_KEY });
   }
 
-  // Streaming variant: prepares routing decision and returns a starter to begin streaming with onChunk
+  // OPTIMIZED STREAMING ROUTER - Uses fast deterministic classifier to eliminate 30s delay
+  // Based on IBM Router research: lightweight classification, not full LLM inference
   async routeStream(
     message: string,
     chatId?: string,
-    opts?: { files?: File[] }
+    opts?: { files?: File[]; onStatusChange?: (status: 'routing' | 'preparing_intake' | 'analyzing_health') => void }
   ): Promise<
     | { intake: HealthIntakePayload; awaitingIntakeAnswers: true }
     | {
@@ -48,23 +52,35 @@ class AIRouter {
         start: (onChunk: (delta: string) => void, onEvent?: (evt: any) => void) => { stop: () => void; finished: Promise<RouteResult> };
       }
   > {
+    // Add to both old and new memory systems
     memoryStore.addUser(message);
-    // Build context similar to route()
-    let profile, historyContext, profileSummary;
-    try {
-      const [profileResult, historyResult] = await Promise.race([
-        Promise.all([profileStore.get(), Promise.resolve(memoryStore.getPlainHistory(8))]),
-        new Promise((_, reject) => setTimeout(() => reject(new Error('Context loading timeout')), 10000))
-      ]) as [any, string];
-      profile = profileResult;
-      historyContext = historyResult;
-      profileSummary = this.buildProfileSummary(profile);
-    } catch {
-      profile = {}; historyContext = ''; profileSummary = '';
-    }
+    enhancedMemoryStore.addToMainContext('user', message, { chatId });
+    
+    // Load context in parallel with routing decision (non-blocking)
+    const contextPromise = (async () => {
+      try {
+        const [profile, historyContext, coreMemory] = await Promise.race([
+          Promise.all([
+            profileStore.get(),
+            Promise.resolve(memoryStore.getPlainHistory(8)),
+            Promise.resolve(enhancedMemoryStore.getCoreMemoryString())
+          ]),
+          new Promise<[any, string, string]>((_, reject) => setTimeout(() => reject(new Error('Context timeout')), 5000))
+        ]);
+        return { 
+          profile, 
+          historyContext, 
+          coreMemory,
+          profileSummary: this.buildProfileSummary(profile) 
+        };
+      } catch {
+        return { profile: {}, historyContext: '', coreMemory: '', profileSummary: '' };
+      }
+    })();
 
     // Handle structured intake answers directly with full model
     if (/^\s*\{\s*"intakeAnswers"/i.test(message)) {
+      const { profile, profileSummary } = await contextPromise;
       let contextPack = '';
       try {
         const parsed = JSON.parse(message);
@@ -79,6 +95,9 @@ class AIRouter {
           if (lines.length) contextPack = `CONTEXT PACK\nIntake Summary:\n${lines.slice(0, 20).join('\n')}`;
         }
       } catch {}
+      // Load user memories for intake-driven health streaming as well
+      const userMemoryContext = await this.getUserMemoryContext(chatId);
+
       const hpIntake: GenAIHistoryPart[] = [
         ...(contextPack ? [{ role: 'user' as const, parts: [{ text: contextPack }] }] : []),
         ...(profileSummary ? [{ role: 'user' as const, parts: [{ text: profileSummary }] }] : []),
@@ -88,10 +107,9 @@ class AIRouter {
         model: 'health',
         isHealthRelated: true,
         start: (onChunk: (delta: string) => void, onEvent?: (evt: any) => void) => {
-          // Call directly on the service to preserve `this` binding inside the method
           const controller = geminiSearchService.streamResponse(
             message,
-            { historyParts: hpIntake, forceSearch: true, thinkingBudget: -1 },
+            { historyParts: hpIntake, forceSearch: true, thinkingBudget: -1, memoryContext: userMemoryContext },
             onChunk,
             onEvent
           );
@@ -108,10 +126,21 @@ class AIRouter {
       };
     }
 
-    // Determine lite routing and potential escalation
-    const forceSearchLite = needsFreshData(message);
+    // HYBRID ROUTING: Fast classifier + Lite LLM for borderline cases
+    // Based on AWS/RouteLLM research: saves time on clear cases, uses LLM for edge cases
+    const healthConfidence = getHealthConfidence(message);
+    console.log('⚡ Fast health classification:', { confidence: healthConfidence.toFixed(2) });
+    
+    // Analyze conversation context for intelligent follow-up detection
     const previousMessages = memoryStore.getHistory();
     const lastAssistantMessage = previousMessages.filter(m => m.role === 'assistant').slice(-1)[0]?.content || '';
+    const last2UserMessages = previousMessages.filter(m => m.role === 'user').slice(-2).map(m => m.content);
+    
+    // Check if user is asking about their own preferences/data from memory
+    const isAskingAboutOwnData = /\b(my|which food i|what food i|do you (remember|recall|know)|tell me about (my|what i))\b/i.test(message.toLowerCase());
+    const hasRecentMemoryRecall = /noted|remember|saved|preference|told me|dislikes?|likes?/i.test(lastAssistantMessage.toLowerCase());
+    const isMemoryFollowUp = isAskingAboutOwnData || (hasRecentMemoryRecall && /(with|using|cooked|dishes?|recipe|food|meal)/i.test(message.toLowerCase()));
+    
     const isSummarizationRequest = /^(summariz|shorter|brief|concise|tldr|condense)/i.test(message.toLowerCase());
     const hasRecentContext = previousMessages.length > 0;
     const startsWithTransition = /^(and |also |but |however |additionally |furthermore |moreover |convert |change |make it |in |to |as )/i.test(message.toLowerCase());
@@ -119,50 +148,93 @@ class AIRouter {
     const isFollowUp = hasRecentContext && (startsWithTransition || referencesContext || /^(elaborate|clarify|tell me more|more details|continue)/i.test(message.toLowerCase()));
     const hasRecentHealthResponse = /health|medical|symptoms|treatment|medicine|🏥 Quick Health Assessment/i.test(lastAssistantMessage);
     const hasRecentIntake = /🏥 Quick Health Assessment/.test(lastAssistantMessage);
-    const skipHealthIntake = isSummarizationRequest || (isFollowUp && hasRecentHealthResponse) || hasRecentIntake;
+    
+    // Skip health intake if: summarization, memory follow-up, or health follow-up
+    const skipHealthIntake = isSummarizationRequest || isMemoryFollowUp || (isFollowUp && hasRecentHealthResponse) || hasRecentIntake;
+    const forceSearchLite = needsFreshData(message);
     const historyParts = memoryStore.getHistoryParts(12);
 
-    // Use lite non-stream to decide (capped at 256 tokens for speed)
-    const liteResp = await geminiLiteService.generateResponse(message, {
-      historyText: [profileSummary, historyContext].filter(Boolean).join('\n\n'),
-      historyParts,
-      forceSearch: forceSearchLite || isFollowUp,
-      thinkingBudget: -1,
-      files: opts?.files,
-      maxTokens: 256
-    } as any);
+    // HYBRID ROUTING DECISION (AWS/RouteLLM best practice)
+    let isHealthQuery = false;
+    let routingMethod = 'fast_classifier';
+    
+    if (skipHealthIntake || message.toLowerCase().includes('how do you know') || message.toLowerCase().includes('how did you get')) {
+      isHealthQuery = false;
+      routingMethod = 'context_skip';
+    } else if (healthConfidence >= 0.55) {
+      // High confidence - trust fast classifier (saves 200-500ms)
+      isHealthQuery = true;
+      routingMethod = 'fast_high_confidence';
+    } else if (healthConfidence < 0.2) {
+      // Very low confidence - clearly not health
+      isHealthQuery = false;
+      routingMethod = 'fast_low_confidence';
+    } else {
+      // Borderline (0.2-0.55) - ask lite LLM for second opinion
+      // Catches: complex medical terms, creative misspellings, edge cases
+      routingMethod = 'llm_classifier_check';
+      
+      // Signal to UI that we're verifying with LLM
+      if (opts?.onStatusChange) {
+        opts.onStatusChange('routing' as any);
+      }
+      
+      isHealthQuery = await this.askLiteLLMClassifier(message);
+    }
 
-    const escalateByToken = /\[\[ESCALATE_HEALTH\]\]/.test(liteResp.content);
-    const isHealthQuery = (liteResp.isHealthRelated || escalateByToken) &&
-      !message.toLowerCase().includes('how do you know') && !message.toLowerCase().includes('how did you get');
-
-    console.log('🔍 Routing decision:', { 
-      isHealthRelated: liteResp.isHealthRelated, 
-      escalateByToken, 
+    console.log('🎯 Routing decision:', { 
+      healthConfidence: healthConfidence.toFixed(2),
       isHealthQuery,
+      routingMethod,
       skipHealthIntake,
-      contentPreview: liteResp.content.substring(0, 100)
+      isFollowUp
     });
 
     if (isHealthQuery) {
-      // Intake generation unless skipped
+      // Wait for context before generating intake
+      const { profileSummary } = await contextPromise;
+      
+      // Signal to UI that we're preparing health intake
+      if (!skipHealthIntake && opts?.onStatusChange) {
+        opts.onStatusChange('preparing_intake');
+      }
+      
+      // Generate intake questions for NEW health queries (not follow-ups)
       const intake = (!skipHealthIntake) ? await healthIntakeService.generateQuestions(message) : null;
       if (intake && intake.questions && intake.questions.length > 0) {
         return { intake, awaitingIntakeAnswers: true } as any;
       }
-      // Health stream starter
+      
+      // If no intake, signal analyzing health context
+      if (opts?.onStatusChange) {
+        opts.onStatusChange('analyzing_health');
+      }
+      
+      // Load user memories for health model (like ChatGPT/Gemini)
+      const userMemoryContext = await this.getUserMemoryContext(chatId);
+      
+      // Health stream starter (immediate streaming, no blocking)
       const hpHealth: GenAIHistoryPart[] = [
         ...(profileSummary ? [{ role: 'user' as const, parts: [{ text: profileSummary }] }] : []),
         ...memoryStore.getHistoryParts(),
       ];
+      
       return {
         model: 'health',
         isHealthRelated: true,
         start: (onChunk: (delta: string) => void, onEvent?: (evt: any) => void) => {
-          // Call directly on the service to preserve `this` binding inside the method
+          console.log('🚀 [AIRouter] Starting HEALTH model with chatId:', chatId);
           const controller = geminiSearchService.streamResponse(
             message,
-            { historyParts: hpHealth, forceSearch: true, thinkingBudget: -1, files: opts?.files },
+            { 
+              historyParts: hpHealth, 
+              forceSearch: true, 
+              thinkingBudget: -1, 
+              files: opts?.files,
+              chatId: chatId,
+              messageId: undefined,
+              memoryContext: userMemoryContext // Inject memories into health model too
+            },
             onChunk,
             onEvent
           );
@@ -172,6 +244,8 @@ class AIRouter {
               let content = await this.addSafetyNoticeIfNeeded(resp.content || '', message);
               memoryStore.addAssistant(content);
               if (chatId) this.updateChatTitle(chatId, message, content);
+              this.scheduleBackgroundSummary(chatId, message, content);
+              
               return { content, isHealthRelated: true, decision: 'critical', modelUsed: 'gemini-2.5-flash-preview-09-2025', sources: resp.sources } as RouteResult;
             })
           };
@@ -179,47 +253,57 @@ class AIRouter {
       };
     }
 
-    // Non-health: lite stream starter
+    // Non-health: lite stream starter (immediate streaming)
+    const { profileSummary, historyContext } = await contextPromise;
+    // Load user memories to inject into context (fast, pre-loaded)
+    const userMemoryContext = await this.getUserMemoryContext(chatId);
+    const needsLiteSearch = needsFreshData(message);
+    
+    // Non-health path: use lite model with streaming
     return {
-      model: 'lite',
+      model: 'lite' as const,
       isHealthRelated: false,
       start: (onChunk: (delta: string) => void, onEvent?: (evt: any) => void) => {
         const controller = geminiLiteService.streamResponse(message, {
-          historyText: [profileSummary, historyContext].filter(Boolean).join('\n\n'),
-          historyParts,
-          forceSearch: forceSearchLite || isFollowUp,
+          historyParts: memoryStore.getHistoryParts(12),
+          forceSearch: needsLiteSearch,
           thinkingBudget: -1,
-          files: opts?.files
+          files: opts?.files,
+          chatId: chatId,
+          messageId: undefined, // messageId will be generated by ChatContainer
+          memoryContext: userMemoryContext // Inject memories into context
         } as any, onChunk, onEvent);
         return {
           stop: controller.stop,
           finished: controller.finished.then(async (resp: any) => {
-            let content = (resp.content || '').replace(/\s*\[\[ESCALATE_HEALTH\]\][^\n]*\n?/g, '').trim();
+            let content = resp.content || '';
+            console.log('🔍 [AIRouter] Response received:', { hasContent: !!content });
             content = await this.addSafetyNoticeIfNeeded(content, message);
             memoryStore.addAssistant(content);
             if (chatId) this.updateChatTitle(chatId, message, content);
+            this.scheduleBackgroundSummary(chatId, message, content);
             return { content, isHealthRelated: false, decision: 'casual', modelUsed: 'gemini-2.5-flash-lite-preview-09-2025', sources: resp.sources } as RouteResult;
           })
         };
       }
     };
   }
+
   async route(message: string, chatId?: string, opts?: { files?: File[] }): Promise<RouteResult> {
-    // Router started
-    
+    // Add to both memory systems
     memoryStore.addUser(message);
+    enhancedMemoryStore.addToMainContext('user', message, { chatId });
     
     // Get user profile and history context with timeout
     let profile, historyContext, profileSummary;
     try {
       const contextPromise = Promise.all([
         profileStore.get(),
-        Promise.resolve(memoryStore.getPlainHistory(8)) // Get history directly from memory store
+        Promise.resolve(memoryStore.getPlainHistory(8))
       ]);
       
-      // Add 10 second timeout for context loading
       const timeoutPromise = new Promise((_, reject) => 
-        setTimeout(() => reject(new Error('Context loading timeout')), 10000)
+        setTimeout(() => reject(new Error('Context loading timeout')), 5000)
       );
       
       const [profileResult, historyResult] = await Promise.race([
@@ -230,11 +314,8 @@ class AIRouter {
       profile = profileResult;
       historyContext = historyResult;
       profileSummary = this.buildProfileSummary(profile);
-      
-      // Context loaded
     } catch (error) {
       console.error('❌ Context loading failed:', error);
-      // Continue with empty context rather than failing completely
       profile = {};
       historyContext = '';
       profileSummary = '';
@@ -262,6 +343,10 @@ class AIRouter {
       
       const profile = profileStore.get();
       const profileSummary = this.buildProfileSummary(profile);
+      
+      // Load user memories for intake processing too
+      const userMemoryContext = await this.getUserMemoryContext(chatId);
+      
       const hpIntake: GenAIHistoryPart[] = [
         ...(contextPack ? [{ role: 'user' as const, parts: [{ text: contextPack }] }] : []),
         ...(profileSummary ? [{ role: 'user' as const, parts: [{ text: profileSummary }] }] : []),
@@ -269,7 +354,8 @@ class AIRouter {
       ];
       const resp = await geminiSearchService.generateResponse(message, {
         historyParts: hpIntake,
-        forceSearch: true // Force web search for intake answer processing
+        forceSearch: true, // Force web search for intake answer processing
+        memoryContext: userMemoryContext
       });
       
       // Inject Safety Notice for substance/danger queries
@@ -278,83 +364,39 @@ class AIRouter {
       return { ...resp, content: labeled, isHealthRelated: true, decision: 'critical', modelUsed: 'gemini-2.5-flash-preview-09-2025', sources: resp.sources };
     }
 
-    // Use lite model for intelligent routing decision
-    // Using lite model for intelligent routing
-    // Force web search for time-sensitive questions using a generic fresh-data detector
+    // FAST DETERMINISTIC HEALTH CLASSIFICATION (no blocking LLM call)
+    const healthConfidence = getHealthConfidence(message);
     const forceSearchLite = needsFreshData(message);
     
     // Check if this is a follow-up question about previous responses
-    const recentHistory = memoryStore.getPlainHistory(15); // Increased history for better context
     const previousMessages = memoryStore.getHistory();
     const lastAssistantMessage = previousMessages.filter(m => m.role === 'assistant').slice(-1)[0]?.content || '';
     
-    // Intelligent context detection - let AI understand patterns, not hardcode examples
     const isSummarizationRequest = /^(summariz|shorter|brief|concise|tldr|condense)/i.test(message.toLowerCase());
-    
-    // Smart follow-up detection based on patterns, not specific examples
     const hasRecentContext = previousMessages.length > 0;
     const startsWithTransition = /^(and |also |but |however |additionally |furthermore |moreover |convert |change |make it |in |to |as )/i.test(message.toLowerCase());
     const referencesContext = /(this|that|it|these|those|them|previous|above|mentioned)/i.test(message.toLowerCase());
-    
-    // Intelligently determine if this is a follow-up about the SAME topic
     const isFollowUp = hasRecentContext && (
       startsWithTransition || 
       referencesContext ||
       /^(elaborate|clarify|tell me more|more details|continue)/i.test(message.toLowerCase())
     );
     
-    // Check if this is a follow-up to a recent health response or intake
-    const hasRecentHealthResponse = lastAssistantMessage.includes('health') || 
-                                   lastAssistantMessage.includes('medical') || 
-                                   lastAssistantMessage.includes('symptoms') ||
-                                   lastAssistantMessage.includes('treatment') ||
-                                   lastAssistantMessage.includes('medicine') ||
-                                   lastAssistantMessage.includes('🏥 Quick Health Assessment');
-    
-    // Check if we already asked intake questions recently
-    const hasRecentIntake = lastAssistantMessage.includes('🏥 Quick Health Assessment');
-    
-    // Only skip health intake for:
-    // 1. Summarization requests
-    // 2. Follow-ups to existing health discussions
-    // 3. Already asked intake questions
+    const hasRecentHealthResponse = /health|medical|symptoms|treatment|medicine|🏥 Quick Health Assessment/i.test(lastAssistantMessage);
+    const hasRecentIntake = /🏥 Quick Health Assessment/.test(lastAssistantMessage);
     const skipHealthIntake = isSummarizationRequest || (isFollowUp && hasRecentHealthResponse) || hasRecentIntake;
-    
-    // Get structured history parts for better context
     const historyParts = memoryStore.getHistoryParts(12);
-    
-    // Calling Lite model...
-    
-    let liteResp;
-    try {
-      const litePromise = geminiLiteService.generateResponse(message, {
-        historyText: [profileSummary, recentHistory].filter(Boolean).join('\n\n'),
-        historyParts: historyParts, // Pass structured history for full context
-        forceSearch: forceSearchLite || isFollowUp,
-        thinkingBudget: -1, // Enable thinking mode for better context understanding
-        files: opts?.files
-      } as any); // Type assertion needed until interface is updated
-      
-      // Add 30 second timeout for model response
-      const liteTimeoutPromise = new Promise((_, reject) => 
-        setTimeout(() => reject(new Error('Lite model response timeout after 30s')), 30000)
-      );
-      
-      liteResp = await Promise.race([litePromise, liteTimeoutPromise])
-      
-      // Lite model responded successfully
-    } catch (error) {
-      console.error('❌ Lite model failed:', error);
-      throw new Error(`AI service temporarily unavailable: ${error instanceof Error ? error.message : 'Unknown error'}`);
-    }
 
-    // Lite model response received
-
-    // Check if this is a health query
-    const escalateByToken = /\[\[ESCALATE_HEALTH\]\]/.test(liteResp.content);
-    const isHealthQuery = (liteResp.isHealthRelated || escalateByToken) && 
+    // ROUTING DECISION: Use fast classifier instead of blocking LLM call
+    const isHealthQuery = healthConfidence > 0.4 && 
                          !message.toLowerCase().includes('how do you know') &&
                          !message.toLowerCase().includes('how did you get');
+    
+    console.log('⚡ Fast routing decision:', { 
+      healthConfidence: healthConfidence.toFixed(2),
+      isHealthQuery,
+      skipHealthIntake
+    });
     
     if (isHealthQuery) {
       console.log('🚀 ESCALATING: Health query detected, using full model with web search');
@@ -389,6 +431,9 @@ class AIRouter {
         };
       }
 
+      // Load user memories for health model
+      const userMemoryContext = await this.getUserMemoryContext(chatId);
+      
       // Use full model for health-related expertise with mandatory web search
       const hpHealth: GenAIHistoryPart[] = [
         ...(profileSummary ? [{ role: 'user' as const, parts: [{ text: profileSummary }] }] : []),
@@ -397,7 +442,8 @@ class AIRouter {
       const resp = await geminiSearchService.generateResponse(message, {
         historyParts: hpHealth,
         forceSearch: true, // Always search for health queries
-        thinkingBudget: -1 // Enable full thinking mode for complex health analysis
+        thinkingBudget: -1, // Enable full thinking mode for complex health analysis
+        memoryContext: userMemoryContext
       });
 
       console.log('✅ HEALTH MODEL response:', {
@@ -408,6 +454,7 @@ class AIRouter {
       // Sanitize and label if substance-related
       const contentH = await this.addSafetyNoticeIfNeeded(resp.content, message);
       memoryStore.addAssistant(contentH);
+      this.scheduleBackgroundSummary(chatId, message, contentH);
       
       // Generate smart chat title if needed
       if (chatId) {
@@ -417,18 +464,28 @@ class AIRouter {
       return { ...resp, content: contentH, isHealthRelated: true, decision: 'critical', modelUsed: 'gemini-2.5-flash-preview-09-2025', sources: resp.sources };
     }
 
-    // For non-health queries, use lite model response directly (strip any stray token)
-    let sanitizedLite = liteResp.content.replace(/\s*\[\[ESCALATE_HEALTH\]\][^\n]*\n?/g, '').trim();
-    // Sanitize and label for substance/danger queries
-    const labeled = await this.addSafetyNoticeIfNeeded(sanitizedLite, message);
-    memoryStore.addAssistant(labeled);
+    // Load user memories for lite model
+    const userMemoryContext = await this.getUserMemoryContext(chatId);
     
-    // Generate smart chat title if needed
+    // For non-health queries, use lite model for response
+    const liteResp = await geminiLiteService.generateResponse(message, {
+      historyText: [profileSummary, historyContext].filter(Boolean).join('\n\n'),
+      historyParts: historyParts,
+      forceSearch: forceSearchLite || isFollowUp,
+      thinkingBudget: -1,
+      files: opts?.files,
+      memoryContext: userMemoryContext
+    } as any);
+    
+    const labeled = await this.addSafetyNoticeIfNeeded(liteResp.content, message);
+    memoryStore.addAssistant(labeled);
+    this.scheduleBackgroundSummary(chatId, message, labeled);
+    
     if (chatId) {
       this.updateChatTitle(chatId, message, labeled);
     }
     
-    console.log('✅ AIRouter.route() completed successfully', {
+    console.log('✅ Non-health route completed', {
       decision: 'casual',
       modelUsed: 'gemini-2.5-flash-lite-preview-09-2025',
       contentLength: labeled.length,
@@ -437,7 +494,7 @@ class AIRouter {
     
     return { 
       content: labeled, 
-      isHealthRelated: liteResp.isHealthRelated, 
+      isHealthRelated: false, 
       decision: 'casual', 
       modelUsed: 'gemini-2.5-flash-lite-preview-09-2025', 
       sources: liteResp.sources 
@@ -451,6 +508,135 @@ class AIRouter {
   }
 
   // Helper to add safety notice if needed (consolidates duplicate logic)
+  // Lite LLM Classifier for borderline cases (AWS/RouteLLM hybrid approach)
+  // Fast ~200-500ms check to catch medical terms we missed
+  private async askLiteLLMClassifier(message: string): Promise<boolean> {
+    try {
+      const classifierPrompt = `You are a medical query classifier. Analyze this query and respond with ONLY "YES" if it's health/medical related, or "NO" if it's not.
+
+Query: "${message}"
+
+Consider it health-related if it mentions:
+- Symptoms (pain, fever, headache, nausea, etc.)
+- Medical conditions or diseases
+- Medications or treatments
+- Body parts in medical context
+- Health concerns or questions
+
+Respond with ONLY one word: YES or NO`;
+
+      const response = await this.ai.models.generateContent({
+        model: this.model,
+        config: {
+          temperature: 0, // Deterministic classification
+          maxOutputTokens: 10
+        },
+        contents: [
+          { role: 'user', parts: [{ text: classifierPrompt }] }
+        ]
+      });
+
+      const answer = (response as any).text?.toLowerCase().trim() || '';
+      const isHealth = answer.includes('yes');
+      
+      console.log('🤖 LLM Classifier:', { 
+        query: message.slice(0, 50),
+        answer: answer.slice(0, 20),
+        isHealth 
+      });
+      
+      return isHealth;
+    } catch (error) {
+      console.error('❌ LLM classifier failed, defaulting to false:', error);
+      // On error, default to false (non-health) to avoid blocking general queries
+      return false;
+    }
+  }
+
+  private scheduleBackgroundSummary(chatId: string | undefined, userMessage: string, aiResponse: string) {
+    try {
+      (async () => {
+        try {
+          // Throttle summaries per chat to avoid flooding memory (min 2 minutes between saves)
+          if (chatId) {
+            const guardKey = `ojas_summary_guard_${chatId}`;
+            const rawGuard = localStorage.getItem(guardKey);
+            let last = 0;
+            try { if (rawGuard) last = JSON.parse(rawGuard)?.last || 0; } catch {}
+            if (Date.now() - last < 2 * 60 * 1000) return;
+            try { localStorage.setItem(guardKey, JSON.stringify({ last: Date.now() })); } catch {}
+          }
+
+          const prompt = `Return ONLY a JSON object with fields: summary (one sentence) and keyPoints (array of up to 3 short strings). No markdown, no code fences.\n\nUser: ${userMessage.slice(0, 800)}\nAssistant: ${aiResponse.slice(0, 800)}`;
+          const resp = await geminiLiteService.generateResponse(prompt, { forceSearch: false });
+          const raw = (resp.content || '').trim();
+          const stripFences = (s: string) => s.replace(/^```json\s*/i, '').replace(/```\s*$/i, '').trim();
+          const tryParse = (s: string) => { try { return JSON.parse(s); } catch { return null; } };
+
+          let parsed: any = tryParse(stripFences(raw));
+          if (!parsed) {
+            const start = raw.indexOf('{');
+            const end = raw.lastIndexOf('}');
+            if (start !== -1 && end > start) parsed = tryParse(raw.slice(start, end + 1));
+          }
+
+          const summary: string = String(parsed?.summary || raw.slice(0, 200));
+          const keyPoints: string[] = Array.isArray(parsed?.keyPoints) ? parsed.keyPoints.slice(0, 3).map(String) : [];
+
+          if (summary && summary.trim().length > 0) {
+            await executeMemoryExtraction('createConversationSummary', { summary, keyPoints }, { chatId });
+          }
+        } catch (err) {
+          console.warn('Background summarization failed:', err);
+        }
+      })();
+    } catch {}
+  }
+
+  private async getUserMemoryContext(chatId?: string): Promise<string> {
+    try {
+      const userId = auth.currentUser?.uid;
+      if (!userId) return '';
+
+      console.log('📥 [AIRouter] Loading user memory context...');
+      const { ref, get } = await import('firebase/database');
+      const { db } = await import('./firebase');
+
+      const [profileSnap, factsSnap] = await Promise.all([
+        get(ref(db, `users/${userId}/memory/profile`)),
+        get(ref(db, `users/${userId}/memory/archival`)),
+      ]);
+
+      const parts: string[] = [];
+      if (profileSnap.exists()) {
+        const profile = profileSnap.val();
+        if (profile.personalDetails) parts.push(`**About You**: ${profile.personalDetails}`);
+        if (profile.healthSummary) parts.push(`**Health Info**: ${profile.healthSummary}`);
+        if (profile.importantPreferences) parts.push(`**Preferences**: ${profile.importantPreferences}`);
+      }
+
+      if (factsSnap.exists()) {
+        const facts: any[] = Object.values(factsSnap.val() || {});
+        const recent = facts
+          .sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0))
+          .slice(0, 5)
+          .map((f: any) => f?.content)
+          .filter(Boolean);
+        if (recent.length > 0) parts.push(`**Saved Facts**: ${recent.join(', ')}`);
+      }
+
+      if (parts.length === 0) return '';
+      const context = `\n\n--- USER MEMORY CONTEXT ---\n${parts.join('\n')}\n--- End Memory Context ---\n`;
+      console.log('✅ [AIRouter] Loaded memory context:', parts.length, 'sections');
+      return context;
+    } catch (err) {
+      console.warn('⚠️ Failed to load memory context:', err);
+      return '';
+    }
+  }
+
+  // Function-calling removed: no background execution of model-emitted function calls
+
   private async addSafetyNoticeIfNeeded(content: string, message: string): Promise<string> {
     const needsSafety = isSubstanceQuery(message);
     if (!needsSafety || /safety notice|disclaimer/i.test(content)) {

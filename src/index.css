@@ -224,6 +224,28 @@
     @apply bg-background text-foreground font-sans antialiased;
     font-feature-settings: "cv11", "ss01";
     font-variation-settings: "opsz" 32;
+    scroll-behavior: auto; /* Disable smooth scrolling for snappier feel */
+  }
+  
+  html {
+    scroll-behavior: auto; /* Natural scrolling, not smooth */
+  }
+  
+  /* React 19.2 Performance Optimizations */
+  /* Optimize interactive elements */
+  button, a, [role="button"], input, select, textarea {
+    /* Optimize touch response on mobile */
+    touch-action: manipulation;
+    /* Prevent 300ms click delay on mobile */
+    -webkit-tap-highlight-color: transparent;
+  }
+  
+  /* Optimize scrolling containers */
+  .overflow-auto, .overflow-y-auto, .overflow-x-auto {
+    /* Enable momentum scrolling on iOS */
+    -webkit-overflow-scrolling: touch;
+    /* Optimize scrolling performance */
+    overscroll-behavior: contain;
   }
 
   /* Typography rules */
@@ -252,22 +274,42 @@
   .border-sidebar-border { border-color: hsl(var(--sidebar-border)); }
   .ring-sidebar-ring { --tw-ring-color: hsl(var(--sidebar-ring)); }
 
-  /* Custom Scrollbar */
+  /* Performance optimizations for smooth scrolling */
+  * {
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
+  /* Custom Scrollbar - Enhanced visibility */
   ::-webkit-scrollbar {
-    width: 8px;
+    width: 10px;
+    height: 10px;
   }
 
   ::-webkit-scrollbar-track {
     background: hsl(var(--background));
+    border-radius: 8px;
   }
 
   ::-webkit-scrollbar-thumb {
-    background: hsl(var(--muted));
-    border-radius: var(--radius);
+    background: hsl(var(--muted-foreground) / 0.3);
+    border-radius: 8px;
+    border: 2px solid hsl(var(--background));
+    transition: background 0.15s ease; /* Smooth hover transition */
   }
 
   ::-webkit-scrollbar-thumb:hover {
-    background: hsl(var(--primary) / 0.6);
+    background: hsl(var(--muted-foreground) / 0.5);
+  }
+
+  ::-webkit-scrollbar-thumb:active {
+    background: hsl(var(--primary) / 0.7);
+  }
+
+  /* Firefox scrollbar */
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: hsl(var(--muted-foreground) / 0.3) hsl(var(--background));
   }
 
   /* Ojas Custom Cursors - Global implementation */
@@ -284,9 +326,17 @@
   }
 
   /* Defaults & semantic mappings */
-  body {
+  body, html {
     /* Adjust hotspot (x y) so click aligns near arrow tip */
     cursor: var(--oj-cursor-arrow) 5 7, auto;
+  }
+  
+  /* Hand cursor for interactive elements */
+  button,
+  a,
+  [role="button"],
+  [onclick] {
+    cursor: var(--oj-cursor-hand) 5 5, pointer !important;
   }
 
   /* Preserve I‑beam on text-editable areas */
@@ -316,9 +366,14 @@
   input[type="button"],
   input[type="submit"],
   label[for],
-  .clickable {
+  .clickable,
+  .cursor-pointer,
+  [data-radix-collection-item],
+  [role="menuitem"],
+  [role="option"],
+  [tabindex="0"] {
     /* Align hand hotspot near finger tip */
-    cursor: var(--oj-cursor-hand) 5 5, pointer;
+    cursor: var(--oj-cursor-hand) 5 5, pointer !important;
   }
 
   /* Disabled states -> Not allowed */

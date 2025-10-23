@@ -1,0 +1,27 @@
+rules_version = '2';
+
+// Firestore Rules for AI MEMORY Database
+// Database: default in asia-south1 (Delhi)
+// Collections: vector_memories
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    
+    // Vector memories - Users can only access their own memories
+    match /vector_memories/{memoryId} {
+      // Read: User must be authenticated and own the memory
+      allow read: if request.auth != null && resource.data.userId == request.auth.uid;
+      
+      // Create: User must be authenticated and set themselves as userId
+      allow create: if request.auth != null && request.resource.data.userId == request.auth.uid;
+      
+      // Update/Delete: User must be authenticated and own the memory
+      allow update, delete: if request.auth != null && resource.data.userId == request.auth.uid;
+    }
+    
+    // Default deny for other collections
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

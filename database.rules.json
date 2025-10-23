@@ -4,8 +4,8 @@
     ".write": false,
     "users": {
       "$uid": {
-        ".read": "$uid === auth.uid",
-        ".write": "$uid === auth.uid"
+        ".read": "$uid === auth.uid && auth.token.email_verified == true",
+        ".write": "$uid === auth.uid && auth.token.email_verified == true"
       }
     }
   }

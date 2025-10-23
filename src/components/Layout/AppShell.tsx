@@ -1,12 +1,13 @@
-import { Link, Outlet, useLocation, useNavigate } from "react-router-dom";
+import { Outlet, useLocation, useNavigate } from "react-router-dom";
 import { Plus, Settings, MoreHorizontal, Pencil, Trash2, LogOut, MessageSquare, User, Activity } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 import { Button } from "@/components/ui/button";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger, DropdownMenuLabel, DropdownMenuSeparator } from "@/components/ui/dropdown-menu";
 import { chatStore } from "@/lib/chatStore";
-import { useEffect, useRef, useState } from "react";
-import { auth } from "@/lib/firebase";
+import { useEffect, useRef, useState, useDeferredValue } from "react";
+import { auth, db } from "@/lib/firebase";
+import { ref, get, child } from "firebase/database";
 
 import {
   AlertDialog,
@@ -24,11 +25,14 @@ import { signOut } from "firebase/auth";
 import { useToast } from "@/hooks/use-toast";
 import SettingsDialog from "@/components/Settings/SettingsDialog";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
+import { getPulseCache, isPulseCacheFresh, prefetchPulse } from "@/lib/pulseCache";
 
 export default function AppShell() {
   const [chats, setChats] = useState(chatStore.list());
   const location = useLocation();
   const navigate = useNavigate();
+  // React 19: Defer chat list updates for instant UI response
+  const deferredChats = useDeferredValue(chats);
   const { toast } = useToast();
   // Collapsible Home sidebar state
   const [homeOpen, setHomeOpen] = useState(false); // pinned open by click
@@ -53,7 +57,7 @@ export default function AppShell() {
     hoverCloseTimer.current = setTimeout(() => {
       setHomeHover(false);
       hoverCloseTimer.current = null;
-    }, 300); // 0.7s delay
+    }, 500); // 500ms delay - clearly visible
   };
   const [openSettings, setOpenSettings] = useState(false);
   const [settings, setSettings] = useState<{ notifications: boolean; theme: 'light' | 'dark' | 'system'; accent: 'orange' | 'blue' | 'green'; compact: boolean; scrollLock: boolean; }>({ notifications: true, theme: 'system', accent: 'orange', compact: false, scrollLock: true });
@@ -77,8 +81,43 @@ export default function AppShell() {
   const [newChatTitle, setNewChatTitle] = useState("");
 
   useEffect(() => {
-    const unsub = auth.onAuthStateChanged(() => {
-      chatStore.hydrateFromCloud().finally(() => setChats(chatStore.list()));
+    const unsub = auth.onAuthStateChanged(async (u) => {
+      // Purge legacy/global and nouser caches when a user signs in to avoid cross-account bleed
+      if (u) {
+        try {
+          localStorage.removeItem('ojas.chats.v1');
+          localStorage.removeItem('ojas.chats.v1.nouser');
+          localStorage.removeItem('ojas.profile.v1');
+        } catch {}
+        try {
+          // Remove old ephemeral entries saved without UID
+          const toRemove: string[] = [];
+          for (let i = 0; i < sessionStorage.length; i++) {
+            const key = sessionStorage.key(i) || '';
+            if (key.startsWith('ojas.ephemeral.nouser.')) toRemove.push(key);
+          }
+          toRemove.forEach((k) => sessionStorage.removeItem(k));
+        } catch {}
+      }
+      await chatStore.hydrateFromCloud().finally(() => setChats(chatStore.list()));
+      if (u) {
+        try {
+          const snap = await get(child(ref(db), `users/${u.uid}/profile`));
+          const cloud = snap.exists() ? (snap.val() || {}) : {};
+          if (cloud && Object.keys(cloud).length > 0) {
+            profileStore.set(cloud as UserProfile);
+            setProfile(cloud as UserProfile);
+            window.dispatchEvent(new Event('ojas-profile-changed'));
+          } else {
+            const basic = { email: u.email || '', name: u.displayName || undefined, photoUrl: u.photoURL || undefined } as UserProfile;
+            profileStore.set(basic);
+            setProfile(basic);
+            window.dispatchEvent(new Event('ojas-profile-changed'));
+          }
+        } catch {}
+      } else {
+        setProfile({} as UserProfile);
+      }
     });
     return () => unsub();
   }, []);
@@ -126,7 +165,7 @@ export default function AppShell() {
     <div className="flex h-screen bg-background relative">
       {/* Icon Rail - Narrow left sidebar (hover opens Home) */}
       <div
-        className="w-[68px] bg-[#fafafa] border-r border-gray-200 flex flex-col items-center py-4"
+        className="w-[68px] bg-[#fafafa] border-r border-gray-200 flex flex-col items-center py-4 z-[110]"
       >
         {/* Logo */}
         <div className="mb-8">
@@ -136,23 +175,17 @@ export default function AppShell() {
         {/* New Chat Button */}
         <button 
           onClick={startNew}
-          className="w-10 h-10 rounded-lg hover:bg-gray-100 flex items-center justify-center mb-6 transition-colors"
+          className="w-10 h-10 rounded-lg hover:bg-gray-100 flex items-center justify-center mb-6 transition-colors cursor-pointer"
         >
           <Plus className="h-5 w-5 text-gray-600" />
         </button>
         
-        {/* Home/Chats Icon - open Chat interface and reveal Home sidebar */}
-        <button
-          className={cn(
-            "w-10 h-10 rounded-lg flex items-center justify-center mb-0 transition-colors",
-            isHomeVisible ? "bg-gray-200 text-gray-900" : "hover:bg-gray-100"
-          )}
+        {/* Home/Chats - Structured box like Perplexity */}
+        <div
+          className="flex flex-col items-center gap-1.5 py-2 px-2 rounded-lg transition-all cursor-pointer"
           onClick={() => {
             cancelHoverCloseDelay();
-            // Navigate to chat interface (home)
-            navigate('/');
-            // Ensure the Home sidebar is visible
-            setHomeOpen(true);
+            navigate('/app');
             setHomeHover(true);
           }}
           onMouseEnter={() => {
@@ -160,25 +193,45 @@ export default function AppShell() {
             setHomeHover(true);
           }}
           onMouseLeave={startHoverCloseDelay}
+          role="button"
           aria-pressed={isHomeVisible}
-          aria-label="Toggle Home"
+          aria-label="Home"
         >
-          <MessageSquare className="h-5 w-5 text-gray-600" />
-        </button>
-        <span className="text-[10px] text-gray-500 mt-0 mb-1 leading-tight">Home</span>
+          <div className={cn(
+            "w-9 h-9 rounded-md flex items-center justify-center transition-all",
+            location.pathname.startsWith('/chat') || location.pathname === '/' || location.pathname === '/app'
+              ? "bg-gradient-to-br from-orange-500 to-primary text-white shadow-md" 
+              : "hover:bg-gray-100 text-gray-600"
+          )}>
+            <MessageSquare className="h-5 w-5" />
+          </div>
+          <span className={cn(
+            "text-[10px] leading-tight transition-colors text-center",
+            location.pathname.startsWith('/chat') || location.pathname === '/' || location.pathname === '/app' ? "text-primary font-medium" : "text-gray-600"
+          )}>Home</span>
+        </div>
         
-        {/* Pulse Feed */}
-        <button
-          className={cn(
-            "w-10 h-10 rounded-lg flex items-center justify-center mb-0 transition-colors",
-            location.pathname === '/pulse' ? "bg-gray-200 text-gray-900" : "hover:bg-gray-100"
-          )}
+        {/* Pulse Feed - Structured box */}
+        <div
+          className="flex flex-col items-center gap-1.5 py-2 px-2 rounded-lg transition-all cursor-pointer"
           onClick={() => navigate('/pulse')}
+          onMouseEnter={() => { const cache = getPulseCache(); if (!isPulseCacheFresh(cache)) prefetchPulse().catch(()=>{}); }}
+          role="button"
           aria-label="Pulse"
         >
-          <Activity className="h-5 w-5 text-gray-600" />
-        </button>
-        <span className="text-[10px] text-gray-500 mt-0 mb-1 leading-tight">Pulse</span>
+          <div className={cn(
+            "w-9 h-9 rounded-md flex items-center justify-center transition-all",
+            location.pathname.startsWith('/pulse')
+              ? "bg-gradient-to-br from-orange-500 to-primary text-white shadow-md"
+              : "hover:bg-gray-100 text-gray-600"
+          )}>
+            <Activity className="h-5 w-5" />
+          </div>
+          <span className={cn(
+            "text-[10px] leading-tight transition-colors text-center",
+            location.pathname.startsWith('/pulse') ? "text-primary font-medium" : "text-gray-600"
+          )}>Pulse</span>
+        </div>
         
         {/* Spacer */}
         <div className="flex-1" />
@@ -186,7 +239,7 @@ export default function AppShell() {
         {/* Profile Icon */}
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
-            <button className="w-10 h-10 rounded-lg hover:bg-gray-100 flex items-center justify-center mb-0 transition-colors">
+            <button className="w-10 h-10 rounded-lg hover:bg-gray-100 flex items-center justify-center mb-0 transition-colors cursor-pointer">
               <Avatar className="h-7 w-7">
                 <AvatarImage src={photoUrl || authPhoto} alt="profile" />
                 <AvatarFallback className="text-[10px] bg-gray-200">{initial}</AvatarFallback>
@@ -209,17 +262,27 @@ export default function AppShell() {
 
       {/* Content Panel - Chat list (collapsible overlay) */}
       <div
-        className={cn(
-          "absolute inset-y-0 left-[68px] bg-white border-r border-gray-200 flex flex-col overflow-hidden transition-[width] duration-300 ease-out z-20",
-          isHomeVisible ? "w-[280px]" : "w-0 pointer-events-none"
-        )}
-        aria-hidden={!isHomeVisible}
+        className="absolute inset-y-0 left-[68px] bg-white border-r border-gray-200 flex flex-col overflow-hidden z-[100]"
+        style={{
+          // Smooth curtain-like animation - width only for clean closing
+          width: isHomeVisible ? '280px' : '0px',
+          pointerEvents: isHomeVisible ? 'auto' : 'none',
+          transition: isHomeVisible 
+            ? 'width 200ms cubic-bezier(0.4, 0, 0.2, 1)' // Smooth open
+            : 'width 120ms cubic-bezier(0.4, 0, 0.2, 1)', // Smooth clean close (no fade)
+        }}
         onMouseEnter={() => {
-          cancelHoverCloseDelay();
-          setHomeHover(true);
+          if (isHomeVisible) { // Only trigger if already visible
+            cancelHoverCloseDelay();
+            // React 19: Compiler handles optimization automatically
+            setHomeHover(true);
+          }
         }}
         onMouseLeave={startHoverCloseDelay}
       >
+        {/* Only render content when visible - huge performance boost */}
+        {isHomeVisible && (
+          <>
         {/* Header */}
         <div className="px-4 py-4 border-b border-gray-100">
           <h2 className="text-sm font-medium text-gray-900">Home</h2>
@@ -229,27 +292,37 @@ export default function AppShell() {
         <div className="flex-1 overflow-y-auto">
           <div className="px-3 py-3">
             <div className="text-[11px] font-medium text-gray-400 uppercase tracking-wider mb-3 px-2">Library</div>
-            {chats.map((c) => (
+            {deferredChats.map((c) => (
               <div 
                 key={c.id} 
                 className={cn(
-                  "group relative flex items-center px-2 py-2 text-sm rounded-md transition-colors cursor-pointer",
+                  "group relative flex items-center gap-1 px-2 py-2 text-sm rounded-md transition-colors",
                   location.pathname === `/chat/${c.id}` 
                     ? "bg-gray-100 text-gray-900" 
                     : "hover:bg-gray-50 text-gray-700"
                 )}
-                onClick={() => navigate(`/chat/${c.id}`)}
               >
-                <Link to={`/chat/${c.id}`} className="flex-1 truncate">
+                <div 
+                  className="flex-1 truncate cursor-pointer"
+                  onClick={() => navigate(`/chat/${c.id}`)}
+                >
                   {c.title}
-                </Link>
+                </div>
                 <DropdownMenu>
                   <DropdownMenuTrigger asChild>
-                    <button className="opacity-0 group-hover:opacity-100 p-1 hover:bg-gray-200 rounded transition-all">
-                      <MoreHorizontal className="h-3 w-3" />
+                    <button 
+                      className={cn(
+                        "p-1 hover:bg-gray-200 dark:hover:bg-gray-700 rounded transition-all",
+                        location.pathname === `/chat/${c.id}` 
+                          ? "opacity-100" 
+                          : "opacity-0 group-hover:opacity-100"
+                      )}
+                      onClick={(e) => e.stopPropagation()}
+                    >
+                      <MoreHorizontal className="h-3.5 w-3.5" />
                     </button>
                   </DropdownMenuTrigger>
-                  <DropdownMenuContent align="end" className="w-40 bg-white dark:bg-gray-900 backdrop-blur-none">
+                  <DropdownMenuContent align="end" className="w-40">
                     <DropdownMenuItem onClick={(e) => {
                       e.stopPropagation();
                       setSelectedChat({ id: c.id, title: c.title });
@@ -269,11 +342,13 @@ export default function AppShell() {
                 </DropdownMenu>
               </div>
             ))}
-            {chats.length === 0 && (
+            {deferredChats.length === 0 && (
               <div className="text-sm text-gray-400 px-2 py-4">No chats yet</div>
             )}
           </div>
         </div>
+        </>
+        )}
         
         {/* Footer removed as requested */}
       </div>

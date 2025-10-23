@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -11,8 +11,9 @@ import { languageStore } from '@/lib/languageStore';
 import { GLOBAL_LANGUAGES, INDIAN_LANGUAGES, DEFAULT_LANGUAGE } from '@/lib/languages';
 import { profileStore, type UserProfile } from '@/lib/profileStore';
 import { auth, storage, db } from '@/lib/firebase';
+import { deleteMyAccount } from '@/lib/auth';
 import { ref as storageRef, uploadBytes, getDownloadURL } from 'firebase/storage';
-import { ref as dbRef, set as dbSet } from 'firebase/database';
+import { ref as dbRef, set as dbSet, get as dbGet, remove as dbRemove } from 'firebase/database';
 import { useToast } from '@/hooks/use-toast';
 
 // Compact two-column settings dialog with a left nav (General, Profile) and right panel content
@@ -23,7 +24,7 @@ type Props = {
   onOpenChange: (open: boolean) => void;
 };
 
-type TabKey = 'general' | 'profile';
+type TabKey = 'general' | 'profile' | 'memory';
 
 const SectionRow: React.FC<{ label: string; description?: string; right?: React.ReactNode; children?: React.ReactNode }>
   = ({ label, description, right, children }) => {
@@ -45,10 +46,33 @@ const SettingsDialog: React.FC<Props> = ({ open, onOpenChange }) => {
   const [profile, setProfile] = useState<UserProfile>(() => profileStore.get() || {});
   const [language, setLanguage] = useState(() => languageStore.get());
   const [uploading, setUploading] = useState(false);
+  const [loadingMem, setLoadingMem] = useState(false);
+  const [archival, setArchival] = useState<Record<string, any>>({});
+  const [summaries, setSummaries] = useState<Record<string, any>>({});
+  const [profileMem, setProfileMem] = useState<any>(null);
 
   useEffect(() => {
     setProfile(profileStore.get() || {});
   }, [open]);
+
+  useEffect(() => {
+    const loadMem = async () => {
+      const user = auth.currentUser; if (!user) return;
+      setLoadingMem(true);
+      try {
+        const [a, s, p] = await Promise.all([
+          dbGet(dbRef(db, `users/${user.uid}/memory/archival`)),
+          dbGet(dbRef(db, `users/${user.uid}/memory/summaries`)),
+          dbGet(dbRef(db, `users/${user.uid}/memory/profile`)),
+        ]);
+        setArchival((a.exists() ? a.val() : {}) || {});
+        setSummaries((s.exists() ? s.val() : {}) || {});
+        setProfileMem((p.exists() ? p.val() : null));
+      } catch {}
+      setLoadingMem(false);
+    };
+    if (open && active === 'memory') { void loadMem(); }
+  }, [open, active]);
 
   // React 19: No useMemo needed - React Compiler optimizes
   const languages = [DEFAULT_LANGUAGE, ...INDIAN_LANGUAGES, ...GLOBAL_LANGUAGES].filter((v, i, a) => a.findIndex(x => x.code === v.code) === i);
@@ -114,9 +138,10 @@ const SettingsDialog: React.FC<Props> = ({ open, onOpenChange }) => {
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-3xl max-h-[85vh] p-0 overflow-hidden rounded-2xl">
+      <DialogContent className="max-w-3xl max-h-[85vh] p-0 overflow-hidden rounded-2xl" aria-describedby="settings-desc">
         <DialogHeader className="sr-only">
           <DialogTitle>Settings</DialogTitle>
+          <DialogDescription id="settings-desc">Manage app language, profile and memory</DialogDescription>
         </DialogHeader>
         <div className="grid grid-cols-12">
           {/* Left rail */}
@@ -130,6 +155,10 @@ const SettingsDialog: React.FC<Props> = ({ open, onOpenChange }) => {
                 <button className={`w-full text-left flex items-center gap-3 px-3 py-2 text-sm rounded-lg transition ${active==='profile' ? 'bg-muted text-foreground' : 'hover:bg-muted hover:text-foreground'}`} onClick={() => setActive('profile')}>
                   <UserIcon className="h-4 w-4" />
                   <span>Profile</span>
+                </button>
+                <button className={`w-full text-left flex items-center gap-3 px-3 py-2 text-sm rounded-lg transition ${active==='memory' ? 'bg-muted text-foreground' : 'hover:bg-muted hover:text-foreground'}`} onClick={() => setActive('memory')}>
+                  <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect><path d="M3 9h18M9 21V9"></path></svg>
+                  <span>Memory</span>
                 </button>
               </div>
             </div>
@@ -162,6 +191,151 @@ const SettingsDialog: React.FC<Props> = ({ open, onOpenChange }) => {
                       <Separator />
                       <div className="flex justify-end px-4 py-3">
                         <Button onClick={handleLanguageSave} className="rounded-xl">Save</Button>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {active === 'memory' && (
+                  <div className="space-y-6">
+                    <h3 className="text-lg font-semibold">Memory</h3>
+                    <div className="rounded-xl border divide-y">
+                      <div className="flex items-center justify-between p-4">
+                        <div>
+                          <div className="text-sm font-medium">Conversation summaries</div>
+                          <div className="text-xs text-muted-foreground">Recent auto-saved summaries</div>
+                        </div>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          className="rounded-xl"
+                          disabled={loadingMem || !auth.currentUser || Object.keys(summaries || {}).length === 0}
+                          onClick={async () => {
+                            if (!auth.currentUser) return;
+                            await dbRemove(dbRef(db, `users/${auth.currentUser.uid}/memory/summaries`));
+                            setSummaries({});
+                          }}
+                        >
+                          Delete all
+                        </Button>
+                      </div>
+                      <div className="p-4 space-y-3">
+                        {loadingMem && <div className="text-xs text-muted-foreground">Loading…</div>}
+                        {!loadingMem && Object.keys(summaries || {}).length === 0 && (
+                          <div className="text-xs text-muted-foreground">No summaries yet.</div>
+                        )}
+                        {!loadingMem && Object.entries(summaries || {})
+                          .sort((a,b) => Number(b[1]?.timestamp || 0) - Number(a[1]?.timestamp || 0))
+                          .map(([key, val]) => (
+                          <div key={key} className="flex items-start justify-between gap-4 p-3 rounded-lg bg-muted/30">
+                            <div className="min-w-0">
+                              <div className="text-sm text-foreground break-words">{String(val?.summary || '')}</div>
+                              {Array.isArray(val?.keyPoints) && val.keyPoints.length > 0 && (
+                                <ul className="list-disc pl-5 mt-2 space-y-1">
+                                  {val.keyPoints.map((kp: any, i: number) => (
+                                    <li key={i} className="text-xs text-foreground/80 break-words">{String(kp)}</li>
+                                  ))}
+                                </ul>
+                              )}
+                            </div>
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              onClick={async () => {
+                                if (!auth.currentUser) return;
+                                await dbRemove(dbRef(db, `users/${auth.currentUser.uid}/memory/summaries/${key}`));
+                                const next = { ...(summaries || {}) } as any; delete next[key]; setSummaries(next);
+                              }}
+                            >
+                              Delete
+                            </Button>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+
+                    <div className="rounded-xl border divide-y">
+                      <div className="flex items-center justify-between p-4">
+                        <div>
+                          <div className="text-sm font-medium">Saved facts</div>
+                          <div className="text-xs text-muted-foreground">Long-term archival memory</div>
+                        </div>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          className="rounded-xl"
+                          disabled={loadingMem || !auth.currentUser || Object.keys(archival || {}).length === 0}
+                          onClick={async () => {
+                            if (!auth.currentUser) return;
+                            await dbRemove(dbRef(db, `users/${auth.currentUser.uid}/memory/archival`));
+                            setArchival({});
+                          }}
+                        >
+                          Delete all
+                        </Button>
+                      </div>
+                      <div className="p-4 space-y-3">
+                        {loadingMem && <div className="text-xs text-muted-foreground">Loading…</div>}
+                        {!loadingMem && Object.keys(archival || {}).length === 0 && (
+                          <div className="text-xs text-muted-foreground">No saved facts yet.</div>
+                        )}
+                        {!loadingMem && Object.entries(archival || {})
+                          .sort((a,b) => Number(b[1]?.timestamp || 0) - Number(a[1]?.timestamp || 0))
+                          .map(([key, val]) => (
+                          <div key={key} className="flex items-start justify-between gap-4 p-3 rounded-lg bg-muted/30">
+                            <div className="min-w-0">
+                              <div className="text-xs text-muted-foreground">{String(val?.type || 'fact')} · {String(val?.importance || 'medium')}</div>
+                              <div className="text-sm text-foreground break-words">{String(val?.summary || val?.content || '')}</div>
+                            </div>
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              onClick={async () => {
+                                if (!auth.currentUser) return;
+                                await dbRemove(dbRef(db, `users/${auth.currentUser.uid}/memory/archival/${key}`));
+                                const next = { ...(archival || {}) } as any; delete next[key]; setArchival(next);
+                              }}
+                            >
+                              Delete
+                            </Button>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+
+                    <div className="rounded-xl border divide-y">
+                      <div className="flex items-center justify-between p-4">
+                        <div>
+                          <div className="text-sm font-medium">Profile memory</div>
+                          <div className="text-xs text-muted-foreground">AI-generated profile summary</div>
+                        </div>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          className="rounded-xl"
+                          disabled={loadingMem || !auth.currentUser || !profileMem}
+                          onClick={async () => {
+                            if (!auth.currentUser) return;
+                            await dbRemove(dbRef(db, `users/${auth.currentUser.uid}/memory/profile`));
+                            setProfileMem(null);
+                          }}
+                        >
+                          Delete all
+                        </Button>
+                      </div>
+                      <div className="p-4 space-y-2">
+                        {loadingMem && <div className="text-xs text-muted-foreground">Loading…</div>}
+                        {!loadingMem && !profileMem && (
+                          <div className="text-xs text-muted-foreground">No profile memory yet.</div>
+                        )}
+                        {!loadingMem && profileMem && (
+                          <div className="space-y-2 text-sm">
+                            {profileMem.personalDetails && (<div><span className="text-xs text-muted-foreground">Personal:</span> {String(profileMem.personalDetails)}</div>)}
+                            {profileMem.healthSummary && (<div><span className="text-xs text-muted-foreground">Health:</span> {String(profileMem.healthSummary)}</div>)}
+                            {profileMem.importantPreferences && (<div><span className="text-xs text-muted-foreground">Preferences:</span> {String(profileMem.importantPreferences)}</div>)}
+                            {profileMem.communicationStyle && (<div><span className="text-xs text-muted-foreground">Style:</span> {String(profileMem.communicationStyle)}</div>)}
+                          </div>
+                        )}
                       </div>
                     </div>
                   </div>
@@ -235,6 +409,38 @@ const SettingsDialog: React.FC<Props> = ({ open, onOpenChange }) => {
 
                       <div className="p-4 flex justify-end sticky bottom-0 bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/75">
                         <Button onClick={saveProfile} className="rounded-xl">Save</Button>
+                      </div>
+                    </div>
+
+                    <div className="rounded-xl border mt-4">
+                      <div className="p-4 flex items-center justify-between">
+                        <div>
+                          <div className="text-sm font-medium text-destructive">Delete account</div>
+                          <div className="text-xs text-muted-foreground">Permanently delete your account and cloud data. This action cannot be undone.</div>
+                        </div>
+                        <Button
+                          variant="destructive"
+                          className="rounded-xl"
+                          onClick={async () => {
+                            if (!auth.currentUser) { toast({ title: 'Please sign in' }); return; }
+                            const ok = window.confirm('Are you sure you want to permanently delete your account?');
+                            if (!ok) return;
+                            const res = await deleteMyAccount();
+                            if (res.ok) {
+                              toast({ title: 'Account deleted' });
+                              try { await auth.signOut(); } catch {}
+                              window.location.href = '/login';
+                              return;
+                            }
+                            if (res.requiresRecentLogin) {
+                              toast({ title: 'Please sign in again', description: 'For security, please re-login and then delete your account.' });
+                              return;
+                            }
+                            toast({ title: 'Deletion failed', description: 'Please try again later.' });
+                          }}
+                        >
+                          Delete
+                        </Button>
                       </div>
                     </div>
                   </div>

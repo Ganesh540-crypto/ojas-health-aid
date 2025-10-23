@@ -16,9 +16,8 @@ import { auth } from "@/lib/firebase";
 import { memoryStore, type MemoryMessage } from "@/lib/memory";
 import { chatStore } from "@/lib/chatStore";
 import { ChevronDown } from "lucide-react";
-import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { languageStore } from "@/lib/languageStore";
-import { INDIAN_LANGUAGES, GLOBAL_LANGUAGES } from "@/lib/languages";
+import { LanguageSelector } from "@/components/ui/language-selector";
 
 import type { ChatMessageAttachment, ChatMessageRecord, MetaItem, ThinkingMode } from "@/features/chat/types";
 import { useChatScroll } from "@/features/chat/hooks/useChatScroll";
@@ -36,6 +35,7 @@ const ChatContainer = () => {
   const [intake, setIntake] = useState<HealthIntakePayload | null>(null);
   const [intakeAnswers, setIntakeAnswers] = useState<Record<string,string>>({});
   const [awaitingIntake, setAwaitingIntake] = useState(false);
+  const [showIntakeModal, setShowIntakeModal] = useState(false);
   const [thinkingMode, setThinkingMode] = useState<ThinkingMode>('thinking');
   const [thinkingLabel, setThinkingLabel] = useState<string>('Thinking');
   const [lastImageAttachments, setLastImageAttachments] = useState<File[] | null>(null);
@@ -53,7 +53,9 @@ const ChatContainer = () => {
     showScrollButton,
     isUserScrolling,
     scrollToBottom,
+    scrollToShowNewMessage,
   } = useChatScroll({ messages, isLoading, streamController, streamingBotId });
+
 
   // Load chat history for this chatId and sync memory
   useEffect(() => {
@@ -71,23 +73,32 @@ const ChatContainer = () => {
         chat = chatStore.get(chatId);
       }
       if (!chat) {
-        const existing = chatStore.list();
-        if (existing.length > 0) {
-          navigate(`/chat/${existing[0].id}`, { replace: true });
-          setChatLoading(false);
-        } else {
-          const created = chatStore.create();
-          navigate(`/chat/${created.id}`, { replace: true });
-          setChatLoading(false);
-        }
+        // Delegate fallback selection/creation to Index route to avoid duplicate logic
+        navigate('/app', { replace: true });
+        setChatLoading(false);
         return;
       }
       if (cancelled) return;
-      const mapped: ChatMessageRecord[] = chat.messages.map(m => {
-        // Restore meta items from storage
-        if (m.metaItems) {
-          setMetaByMessage(prev => ({ ...prev, [m.id]: m.metaItems || [] }));
+      
+      // Restore pending health intake if exists
+      if (chat.pendingIntake) {
+        setIntake(chat.pendingIntake as any);
+        setAwaitingIntake(true);
+        setShowIntakeModal(false);
+      }
+      
+      // Restore meta items from storage
+      const restoredMeta: Record<string, MetaItem[]> = {};
+      chat.messages.forEach(m => {
+        if (m.metaItems && m.metaItems.length > 0) {
+          restoredMeta[m.id] = m.metaItems;
         }
+      });
+      if (Object.keys(restoredMeta).length > 0) {
+        setMetaByMessage(restoredMeta);
+      }
+      
+      const mapped: ChatMessageRecord[] = chat.messages.map(m => {
         // Convert stored attachment URLs to File-like objects for preview
         let attachments: ChatMessageAttachment[] | undefined;
         if (m.attachments && m.attachments.length > 0) {
@@ -141,8 +152,11 @@ const ChatContainer = () => {
       const packaged = { intakeAnswers: { freeform: message, structured: intakeAnswers } };
       const jsonPayload = JSON.stringify(packaged, null, 2);
       setAwaitingIntake(false);
+      setShowIntakeModal(false);
       setIntake(null);
       setIntakeAnswers({});
+      // Clear pending intake from storage
+      if (chatId) chatStore.clearPendingIntake(chatId);
       // Send answers to AI without adding a user-visible message
       return submitIntake(jsonPayload);
     }
@@ -194,20 +208,14 @@ const ChatContainer = () => {
       chatStore.addMessage(chatId, 'user', finalMessage, uploadedAttachments);
       chatStore.pushToCloud();
     }
-    // Pick loader mode+label heuristically before routing so UI shows the right state
-    const inferLoader = (m: string): { mode: 'thinking' | 'searching'; label: string } => {
-      const lower = m.toLowerCase();
-      const research = ['research','sources','cite','evidence','current','today','market','price','best','compare','latest','india'];
-      const health = ['symptom','pain','fever','medicine','medication','doctor','hospital','treatment','diet','exercise','injury','headache','diabetes','cancer','allergy','infection','virus','blood pressure','anxiety','depression','stress','fracture','urgent','emergency','serious','chest pain','stroke','heart attack'];
-      const trigger = research.some(k => lower.includes(k)) || health.some(k => lower.includes(k));
-      return trigger ? { mode: 'searching', label: 'Searching' } : { mode: 'thinking', label: 'Thinking' };
-    };
-    // Always show a brief Routing phase first
+    
+    // Scroll new query to top of viewport
+    scrollToShowNewMessage();
+    
+    // Show routing state
     setThinkingMode('routing');
     setThinkingLabel('Routing');
     setIsLoading(true);
-    // Clear any previous meta for smooth transitions
-    setMetaByMessage({});
     try {
       const { aiRouter } = await import('@/lib/aiRouter');
       // Decide which files to send to AI. If none provided, but the message refers to images and we have
@@ -223,19 +231,35 @@ const ChatContainer = () => {
           filesForAI = lastImageAttachments;
         }
       }
-      const routed = await aiRouter.routeStream(finalMessage, chatId || undefined, { files: filesForAI } as any);
+      const routed = await aiRouter.routeStream(finalMessage, chatId || undefined, { 
+        files: filesForAI,
+        onStatusChange: (status) => {
+          if (status === 'preparing_intake') {
+            setThinkingMode('analyzing');
+            setThinkingLabel('Preparing health intake');
+          } else if (status === 'analyzing_health') {
+            setThinkingMode('analyzing');
+            setThinkingLabel('Analyzing health context');
+          }
+        }
+      } as any);
       // Intake path
       if ((routed as any).intake && (routed as any).awaitingIntakeAnswers) {
         const r = routed as any;
-        // Show health intake transition
-        setThinkingMode('analyzing');
-        setThinkingLabel('Preparing health questions');
-        // Keep loading visible for transition
-        setTimeout(() => {
-          setIntake(r.intake);
-          setAwaitingIntake(true);
-          setIsLoading(false);
-        }, 400);
+        // Intake questions are ready - save and show them
+        setIntake(r.intake);
+        setAwaitingIntake(true);
+        setShowIntakeModal(true); // Show modal immediately when generated
+        setIsLoading(false);
+        
+        // Save pending intake to persist across refreshes
+        if (chatId) {
+          chatStore.setPendingIntake(chatId, {
+            questions: r.intake.questions,
+            userMessage: message,
+            createdAt: Date.now()
+          });
+        }
         return;
       }
       const starter = routed as { model: 'lite' | 'health'; isHealthRelated: boolean; start: (onChunk: (delta: string) => void, onEvent?: (evt: any) => void) => { stop: () => void; finished: Promise<{ content: string; isHealthRelated: boolean; sources?: Array<{ title: string; url: string; snippet?: string; displayUrl?: string }> }> } };
@@ -258,7 +282,6 @@ const ChatContainer = () => {
       const controller = starter.start((delta: string) => {
         accumulated += delta || '';
         setMessages(prev => prev.map(m => m.id === botId ? { ...m, content: accumulated } : m));
-        if (scrollLocked) scrollToBottom(false);
         if (chatId && botMessageId) chatStore.updateMessage(chatId, botId, accumulated);
       }, (evt?: any) => {
         if (!evt) return;
@@ -269,23 +292,19 @@ const ChatContainer = () => {
             metaAcc.push({ type: 'thought', text: evt.text, ts: Date.now() });
           }
           if (evt.type === 'search_query' && typeof evt.query === 'string') {
-            // Show searching state and record the query
             setThinkingMode('searching');
-            setThinkingLabel('Searching');
+            setThinkingLabel(starter.isHealthRelated ? 'Searching medical sources' : 'Searching');
             arr.push({ type: 'search_query', query: evt.query, ts: Date.now() });
             metaAcc.push({ type: 'search_query', query: evt.query, ts: Date.now() });
           }
-          // Cap to last 50 items to avoid bloat
-          const capped = arr.slice(-50);
-          // Don't save during streaming to avoid excessive writes
-          return { ...prev, [botId]: capped };
+          return { ...prev, [botId]: arr.slice(-50) };
         });
       });
       setStreamController({ stop: controller.stop });
       const finished = await controller.finished;
-      // Finalize content and sources
       const finalText = finished.content || accumulated;
       const finalMetaItems = metaAcc.length > 0 ? metaAcc : (metaByMessage[botId] || []);
+      
       setMessages(prev => prev.map(m => m.id === botId ? { ...m, content: finalText, sources: finished.sources } : m));
       if (chatId) {
         if (!botMessageId) chatStore.addMessage(chatId, 'assistant', finalText);
@@ -293,8 +312,7 @@ const ChatContainer = () => {
         if (finished.sources && finished.sources.length > 0) {
           chatStore.updateMessageSources(chatId, botId, finished.sources);
         }
-        // Save meta items to Firebase for persistence
-        if (finalMetaItems.length > 0) {
+        if (finalMetaItems && finalMetaItems.length > 0) {
           chatStore.updateMessageMeta(chatId, botId, finalMetaItems);
         }
         chatStore.pushToCloud();
@@ -320,18 +338,35 @@ const ChatContainer = () => {
 
   // Hidden submit path for intake answers: does NOT add a user message; streams assistant reply
   const submitIntake = async (jsonPayload: string) => {
-    // Intake flows always escalate to search
-    setThinkingMode('searching');
-    setThinkingLabel('Searching');
+    // Intake answers submitted - show analyzing state
+    setThinkingMode('analyzing');
+    setThinkingLabel('Analyzing health context');
     setIsLoading(true);
     try {
       const { aiRouter } = await import('@/lib/aiRouter');
-      const routed = await aiRouter.routeStream(jsonPayload, chatId || undefined);
+      const routed = await aiRouter.routeStream(jsonPayload, chatId || undefined, {
+        onStatusChange: (status) => {
+          if (status === 'analyzing_health') {
+            setThinkingMode('searching');
+            setThinkingLabel('Searching medical sources');
+          }
+        }
+      } as any);
       if ((routed as any).intake && (routed as any).awaitingIntakeAnswers) {
         const r = routed as any;
         setIntake(r.intake);
         setAwaitingIntake(true);
+        setShowIntakeModal(true);
         setIsLoading(false);
+        
+        // Save pending intake (for submitIntake path)
+        if (chatId) {
+          chatStore.setPendingIntake(chatId, {
+            questions: r.intake.questions,
+            userMessage: '', // No original message in intake submission
+            createdAt: Date.now()
+          });
+        }
         return;
       }
       const starter = routed as { model: 'lite' | 'health'; isHealthRelated: boolean; start: (onChunk: (delta: string) => void, onEvent?: (evt: any) => void) => { stop: () => void; finished: Promise<{ content: string; isHealthRelated: boolean; sources?: Array<{ title: string; url: string; snippet?: string; displayUrl?: string }> }> } };
@@ -350,7 +385,6 @@ const ChatContainer = () => {
       const controller = starter.start((delta: string) => {
         accumulated += delta || '';
         setMessages(prev => prev.map(m => m.id === botId ? { ...m, content: accumulated } : m));
-        if (scrollLocked) scrollToBottom(false);
         if (chatId && botMessageId) chatStore.updateMessage(chatId, botId, accumulated);
       }, (evt?: any) => {
         if (!evt) return;
@@ -362,7 +396,7 @@ const ChatContainer = () => {
           }
           if (evt.type === 'search_query' && typeof evt.query === 'string') {
             setThinkingMode('searching');
-            setThinkingLabel('Searching');
+            setThinkingLabel('Searching medical sources');
             arr.push({ type: 'search_query', query: evt.query, ts: Date.now() });
             metaAcc.push({ type: 'search_query', query: evt.query, ts: Date.now() });
           }
@@ -373,6 +407,7 @@ const ChatContainer = () => {
       const finished = await controller.finished;
       const finalText = finished.content || accumulated;
       const finalMetaItems = metaAcc.length > 0 ? metaAcc : (metaByMessage[botId] || []);
+      
       setMessages(prev => prev.map(m => m.id === botId ? { ...m, content: finalText, sources: finished.sources } : m));
       if (chatId) {
         if (!botMessageId) chatStore.addMessage(chatId, 'assistant', finalText);
@@ -380,8 +415,7 @@ const ChatContainer = () => {
         if (finished.sources && finished.sources.length > 0) {
           chatStore.updateMessageSources(chatId, botId, finished.sources);
         }
-        // Save meta items to Firebase for persistence
-        if (finalMetaItems.length > 0) {
+        if (finalMetaItems && finalMetaItems.length > 0) {
           chatStore.updateMessageMeta(chatId, botId, finalMetaItems);
         }
         chatStore.pushToCloud();
@@ -434,102 +468,141 @@ const ChatContainer = () => {
           <>
             <ScrollArea className="flex-1 overflow-y-auto" ref={scrollAreaRef}>
               <div
-                className="min-h-full mx-auto px-4 sm:px-6 lg:px-8 xl:px-16 pt-8 pb-32"
+                className="min-h-full mx-auto px-4 sm:px-6 lg:px-8 xl:px-16 pb-32"
                 style={{ maxWidth: 900 }}
               >
-                {messages.map((message, index) => (
-                  <div 
-                    key={message.id}
-                    data-message-id={message.id}
-                    data-message-role={message.isBot ? 'assistant' : 'user'}
-                    data-message-content={message.content}
-                  >
-                    {/* Show divider after complete exchanges (before new user questions) */}
-                    {index > 0 && !message.isBot && messages[index - 1]?.isBot && (
-                      <div className="border-t border-border/80 my-8" />
-                    )}
-                    <div className={message.isBot ? 'animate-fade-in' : ''}>
-                      {!message.isBot ? (
-                      <>
-                        <div className="mb-6">
-                          <h1 className="text-xl sm:text-[26px] md:text-[30px] font-normal text-foreground leading-tight">
-                            {(() => {
-                              const contentToShow = lang.code === 'en' ? message.content : (translatedMap[message.id] || message.content);
-                              const linkRegex = /(?:https?:\/\/)?(?:www\.)?[a-z0-9-]+(?:\.[a-z0-9-]+)+(?:[\/?#][^\s]*)?/gi;
-                              const contentParts = contentToShow.split(linkRegex);
-                              const matchesFinal = contentToShow.match(linkRegex) || [];
-                              return contentParts.map((part, i) => (
-                                <React.Fragment key={i}>
-                                  {part}
-                                  {matchesFinal[i] && (
-                                    <a 
-                                      href={matchesFinal[i].startsWith('http') ? matchesFinal[i] : `https://${matchesFinal[i]}`}
-                                      target="_blank"
-                                      rel="noopener noreferrer"
-                                      className="text-orange-500 hover:text-orange-600 underline underline-offset-2 inline-flex items-center gap-1"
-                                    >
-                                      {matchesFinal[i]}
-                                      <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
-                                      </svg>
-                                    </a>
-                                  )}
-                                </React.Fragment>
-                              ));
-                            })()}
-                          </h1>
-                        </div>
-                        {Array.isArray(message.attachments) && message.attachments.length > 0 && (
-                          <div className="mt-3 flex flex-wrap gap-2">
-                            {message.attachments.map((file, i) => {
-                              const isImage = file.type.startsWith('image/');
-                              const isPdf = file.type === 'application/pdf';
-                              // Use Firebase URL if available, otherwise create object URL
-                              const url = isImage ? ((file as any).firebaseUrl || URL.createObjectURL(file)) : undefined;
-                              const fileSize = (file as any).fileSize ?? file.size;
-                              return (
-                                <div key={i} className="border rounded-md bg-muted p-2 flex items-center gap-2">
-                                  {isImage ? (
-                                    <img src={url} alt={file.name} className="w-20 h-20 object-cover rounded" />
-                                  ) : (
-                                    <div className="w-10 h-10 flex items-center justify-center bg-muted rounded text-xs">
-                                      {isPdf ? 'PDF' : (file.type?.split('/')?.[1] || 'FILE').toUpperCase()}
-                                    </div>
-                                  )}
-                                  <div className="min-w-0">
-                                    <div className="text-xs font-medium truncate max-w-[220px]">{file.name}</div>
-                                    <div className="text-[10px] text-muted-foreground">{(fileSize / 1024 / 1024).toFixed(2)} MB</div>
+                {(() => {
+                  // Group messages into pairs: each user message + its bot response
+                  const pairs: Array<{ userMsg: ChatMessageRecord; botMsg?: ChatMessageRecord; pairIndex: number }> = [];
+                  
+                  for (let i = 0; i < messages.length; i++) {
+                    const msg = messages[i];
+                    if (!msg.isBot) {
+                      // This is a user message, check if next is bot response
+                      const nextMsg = messages[i + 1];
+                      pairs.push({
+                        userMsg: msg,
+                        botMsg: nextMsg?.isBot ? nextMsg : undefined,
+                        pairIndex: pairs.length
+                      });
+                      // Skip the bot message in next iteration if it exists
+                      if (nextMsg?.isBot) i++;
+                    }
+                  }
+                  
+                  return pairs.map((pair, pairIdx) => (
+                    <div
+                      key={`pair-${pair.userMsg.id}`}
+                      data-message-pair
+                      data-pair-index={pairIdx}
+                      data-user-message-id={pair.userMsg.id}
+                      data-bot-message-id={pair.botMsg?.id}
+                      className={pairIdx === 0 ? "w-full pt-8" : "w-full"}
+                    >
+                      {/* Divider at top of pair (except first pair) */}
+                      {pairIdx > 0 && (
+                        <div className="border-t border-border/80 my-8" />
+                      )}
+                      
+                      {/* User Query */}
+                      <div className="mb-6">
+                        <h1 className="text-xl sm:text-[26px] md:text-[30px] font-normal text-foreground leading-tight">
+                          {(() => {
+                            const contentToShow = lang.code === 'en' ? pair.userMsg.content : (translatedMap[pair.userMsg.id] || pair.userMsg.content);
+                            const linkRegex = /(?:https?:\/\/)?(?:www\.)?[a-z0-9-]+(?:\.[a-z0-9-]+)+(?:[\/\?#][^\s]*)?/gi;
+                            const contentParts = contentToShow.split(linkRegex);
+                            const matchesFinal = contentToShow.match(linkRegex) || [];
+                            return contentParts.map((part, i) => (
+                              <React.Fragment key={i}>
+                                {part}
+                                {matchesFinal[i] && (
+                                  <a 
+                                    href={matchesFinal[i].startsWith('http') ? matchesFinal[i] : `https://${matchesFinal[i]}`}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    className="text-orange-500 hover:text-orange-600 underline underline-offset-2 inline-flex items-center gap-1"
+                                  >
+                                    {matchesFinal[i]}
+                                    <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
+                                    </svg>
+                                  </a>
+                                )}
+                              </React.Fragment>
+                            ));
+                          })()}
+                        </h1>
+                      </div>
+                      
+                      {/* Attachments */}
+                      {Array.isArray(pair.userMsg.attachments) && pair.userMsg.attachments.length > 0 && (
+                        <div className="mt-3 flex flex-wrap gap-2">
+                          {pair.userMsg.attachments.map((file, i) => {
+                            const isImage = file.type.startsWith('image/');
+                            const isPdf = file.type === 'application/pdf';
+                            const url = isImage ? ((file as any).firebaseUrl || URL.createObjectURL(file)) : undefined;
+                            const fileSize = (file as any).fileSize ?? file.size;
+                            return (
+                              <div key={i} className="border rounded-md bg-muted p-2 flex items-center gap-2">
+                                {isImage ? (
+                                  <img src={url} alt={file.name} className="w-20 h-20 object-cover rounded" />
+                                ) : (
+                                  <div className="w-10 h-10 flex items-center justify-center bg-muted rounded text-xs">
+                                    {isPdf ? 'PDF' : (file.type?.split('/')?.[1] || 'FILE').toUpperCase()}
                                   </div>
+                                )}
+                                <div className="min-w-0">
+                                  <div className="text-xs font-medium truncate max-w-[220px]">{file.name}</div>
+                                  <div className="text-[10px] text-muted-foreground">{(fileSize / 1024 / 1024).toFixed(2)} MB</div>
                                 </div>
-                              );
-                            })}
-                          </div>
-                        )}
-                        {/* Show sources right after question if next message is bot with sources */}
-                        {messages[index + 1]?.isBot && messages[index + 1]?.sources && (
-                          <SourcesDisplay sources={messages[index + 1].sources} className="mb-4" />
-                        )}
-                      </>
-                    ) : (
-                      <ChatMessage
-                        message={lang.code === 'en' ? message.content : (translatedMap[message.id] || message.content)}
-                        isBot={message.isBot}
-                        timestamp={message.timestamp}
-                        isThinking={streamingBotId === message.id}
-                        healthRelated={message.healthRelated}
-                        onEdit={undefined}
-                        userAvatar={undefined}
-                        thinkingMode={thinkingMode}
-                        thinkingLabel={thinkingLabel}
-                        sources={undefined}
-                        metaItems={metaByMessage[message.id]}
-                        metaOpen={false}
-                        onToggleMeta={undefined}
-                      />
-                    )}
+                              </div>
+                            );
+                          })}
+                        </div>
+                      )}
+                      
+                      {/* Sources Display */}
+                      {pair.botMsg?.sources && (
+                        <SourcesDisplay sources={pair.botMsg.sources} className="mb-4" />
+                      )}
+                      
+                      {/* Bot Response */}
+                      {pair.botMsg && (
+                        <div className="animate-fade-in">
+                          <ChatMessage
+                            message={lang.code === 'en' ? pair.botMsg.content : (translatedMap[pair.botMsg.id] || pair.botMsg.content)}
+                            isBot={pair.botMsg.isBot}
+                            timestamp={pair.botMsg.timestamp}
+                            isThinking={streamingBotId === pair.botMsg.id}
+                            healthRelated={pair.botMsg.healthRelated}
+                            onEdit={undefined}
+                            userAvatar={undefined}
+                            thinkingMode={thinkingMode}
+                            thinkingLabel={thinkingLabel}
+                            sources={pair.botMsg.sources}
+                            metaItems={metaByMessage[pair.botMsg.id]}
+                            metaOpen={false}
+                            onToggleMeta={undefined}
+                          />
+                        </div>
+                      )}
                     </div>
-                  </div>
-                ))}
+                  ));
+                })()}
+              {/* Health Intake Button - shows right after last message */}
+              {awaitingIntake && intake && !showIntakeModal && (
+                <div className="w-full max-w-3xl mx-auto mt-4 mb-2 animate-in fade-in duration-300">
+                  <button
+                    onClick={() => setShowIntakeModal(true)}
+                    className="flex items-center gap-2 px-3 py-1.5 text-xs bg-gradient-to-r from-orange-500 to-primary text-white rounded-full shadow-sm hover:shadow-md transition-all duration-200 hover:scale-[1.02] font-medium mx-auto"
+                  >
+                    <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                    </svg>
+                    Answer Health Questions
+                  </button>
+                </div>
+              )}
               {/* Show loading below user message */}
               {isLoading && !streamController && messages.length > 0 && messages[messages.length - 1].isBot === false && (
                 <div className="mt-8 w-full max-w-3xl mx-auto">
@@ -559,38 +632,7 @@ const ChatContainer = () => {
           </>
         )}
         {/* Language selector - far right side */}
-        {(() => {
-          const allLanguages = [...GLOBAL_LANGUAGES, ...INDIAN_LANGUAGES].filter(
-            (l, i, arr) => arr.findIndex(x => x.code === l.code) === i
-          );
-          const selectedLabel = allLanguages.find(l => l.code === lang.code)?.label || 'English';
-          return (
-            <div className="fixed bottom-6 right-6 z-30">
-              <DropdownMenu>
-                <DropdownMenuTrigger asChild>
-                  <Button
-                    type="button"
-                    variant="secondary"
-                    size="icon"
-                    className="h-10 w-10 rounded-full font-semibold shadow-md border border-border bg-background hover:bg-muted"
-                    aria-label={`Change language (current: ${selectedLabel})`}
-                    title={selectedLabel}
-                  >
-                    {selectedLabel.charAt(0)}
-                  </Button>
-                </DropdownMenuTrigger>
-                <DropdownMenuContent align="end" className="w-64 max-h-56 overflow-y-auto bg-background">
-                  {allLanguages.map((l) => (
-                    <DropdownMenuItem key={l.code} onClick={() => languageStore.set(l.code)}>
-                      <span className="mr-2 w-4 inline-block text-primary">{lang.code === l.code ? '✓' : ''}</span>
-                      <span>{l.label}</span>
-                    </DropdownMenuItem>
-                  ))}
-                </DropdownMenuContent>
-              </DropdownMenu>
-            </div>
-          );
-        })()}
+        <LanguageSelector />
         {/* Input centered, matching response container width */}
         <div className="fixed bottom-0 left-[68px] right-0 bg-gradient-to-t from-background via-background/95 to-transparent pt-6 pb-4 z-20">
           <div className="mx-auto px-4 sm:px-6 lg:px-8 xl:px-16" style={{ maxWidth: 900 }}>
@@ -605,20 +647,24 @@ const ChatContainer = () => {
             />
           </div>
         </div>
-        {awaitingIntake && intake && (
+
+        {/* Health Intake Modal */}
+        {awaitingIntake && intake && showIntakeModal && (
           <HealthIntakeModal
             questions={intake.questions}
             onSubmit={(answers) => {
               const jsonPayload = JSON.stringify({ intakeAnswers: answers }, null, 2);
               setAwaitingIntake(false);
+              setShowIntakeModal(false);
               setIntake(null);
               setIntakeAnswers({});
+              // Clear pending intake from storage
+              if (chatId) chatStore.clearPendingIntake(chatId);
               setTimeout(() => submitIntake(jsonPayload), 0);
             }}
             onClose={() => {
-              setAwaitingIntake(false);
-              setIntake(null);
-              setIntakeAnswers({});
+              // Just close modal, keep intake pending (user can reopen with button)
+              setShowIntakeModal(false);
             }}
           />
         )}

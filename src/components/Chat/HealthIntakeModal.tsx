@@ -15,30 +15,75 @@ export default function HealthIntakeModal({ questions, onSubmit, onClose }: Heal
   const [selectedMultiple, setSelectedMultiple] = useState<Set<string>>(new Set());
   const [additionalDetails, setAdditionalDetails] = useState('');
   const [showAdditionalDetails, setShowAdditionalDetails] = useState(false);
+  const [justNavigatedBack, setJustNavigatedBack] = useState(false);
+  const [manualInput, setManualInput] = useState<Record<string, string>>({});
 
   // Show additional details input after all questions
   const isOnAdditionalDetails = currentIndex === questions.length;
   const currentQuestion = !isOnAdditionalDetails ? questions[currentIndex] : null;
   const totalSteps = questions.length + 1; // +1 for additional details
   const progress = ((currentIndex + 1) / totalSteps) * 100;
-  const isMultiSelect = currentQuestion?.multiSelect === true;
+  
+  // Detect multi-select: Use multiSelect flag OR detect "(Select all that apply)" in question text
+  const isMultiSelect = currentQuestion?.multiSelect === true || 
+    (currentQuestion?.text && /\(select all that apply\)/i.test(currentQuestion.text));
+  
   const currentAnswer = currentQuestion ? answers[currentQuestion.id] : null;
 
-  // Auto-advance for single-select after a short delay
+  // Handle browser back button to go back through questions OR close modal
   useEffect(() => {
-    if (!isMultiSelect && currentAnswer && currentIndex < questions.length) {
+    // Push initial modal state
+    window.history.pushState({ healthIntakeModal: true, questionIndex: 0 }, '');
+    
+    const handlePopState = (e: PopStateEvent) => {
+      // If we're still in the modal, prevent default back and handle internally
+      if (currentIndex > 0) {
+        // Go to previous question instead of closing
+        window.history.pushState({ healthIntakeModal: true, questionIndex: currentIndex - 1 }, '');
+        setCurrentIndex(prev => Math.max(0, prev - 1));
+      } else {
+        // At first question or additional details - close modal
+        onClose();
+      }
+    };
+    
+    window.addEventListener('popstate', handlePopState);
+    
+    return () => {
+      window.removeEventListener('popstate', handlePopState);
+    };
+  }, [currentIndex, onClose]);
+
+  // Load multi-select answers when question changes
+  useEffect(() => {
+    if (currentQuestion && isMultiSelect && answers[currentQuestion.id]) {
+      setSelectedMultiple(new Set(answers[currentQuestion.id] as string[]));
+    } else if (!isMultiSelect) {
+      setSelectedMultiple(new Set()); // Clear for single-select questions
+    }
+  }, [currentIndex, currentQuestion?.id]); // Re-run when question changes
+
+  // Auto-advance for single-select with smooth animation (but not after back navigation)
+  useEffect(() => {
+    if (!isMultiSelect && currentAnswer && currentIndex < questions.length && !justNavigatedBack) {
       const timer = setTimeout(() => {
         setCurrentIndex(currentIndex + 1);
-      }, 500); // Small delay for visual feedback
+      }, 350); // Reduced delay for smoother feel
       return () => clearTimeout(timer);
     }
-  }, [currentAnswer, isMultiSelect, currentIndex, questions.length]);
+    // Reset the back navigation flag after effect runs
+    if (justNavigatedBack) {
+      setJustNavigatedBack(false);
+    }
+  }, [currentAnswer, isMultiSelect, currentIndex, questions.length, justNavigatedBack]);
 
   const handleSingleSelect = (option: string) => {
     setAnswers({ ...answers, [currentQuestion.id]: option });
   };
 
   const handleMultiSelect = (option: string) => {
+    if (!currentQuestion) return;
+    
     const newSelected = new Set(selectedMultiple);
     if (newSelected.has(option)) {
       newSelected.delete(option);
@@ -57,15 +102,7 @@ export default function HealthIntakeModal({ questions, onSubmit, onClose }: Heal
 
     if (currentIndex < questions.length) {
       setCurrentIndex(currentIndex + 1);
-      // Load existing answers for next question if multi-select
-      if (currentIndex + 1 < questions.length) {
-        const nextQuestion = questions[currentIndex + 1];
-        if (nextQuestion?.multiSelect && answers[nextQuestion.id]) {
-          setSelectedMultiple(new Set(answers[nextQuestion.id] as string[]));
-        } else {
-          setSelectedMultiple(new Set());
-        }
-      }
+      // selectedMultiple will be updated by the useEffect above
     } else {
       // Submit all answers including additional details
       const finalAnswers = { ...answers };
@@ -77,7 +114,13 @@ export default function HealthIntakeModal({ questions, onSubmit, onClose }: Heal
   };
 
   const handleBack = () => {
+    // Save current multi-select answers before going back
+    if (currentQuestion && isMultiSelect) {
+      setAnswers({ ...answers, [currentQuestion.id]: Array.from(selectedMultiple) });
+    }
+    
     if (currentIndex > 0) {
+      setJustNavigatedBack(true); // Prevent auto-advance on single-select questions
       setCurrentIndex(currentIndex - 1);
       // Load previous multi-select answers
       const prevQuestion = questions[currentIndex - 1];
@@ -92,8 +135,8 @@ export default function HealthIntakeModal({ questions, onSubmit, onClose }: Heal
   const canProceed = isOnAdditionalDetails 
     ? true // Can skip additional details
     : isMultiSelect 
-    ? selectedMultiple.size > 0 
-    : !!currentAnswer;
+    ? selectedMultiple.size > 0 || (currentQuestion && manualInput[currentQuestion.id]?.trim())
+    : !!currentAnswer || (currentQuestion && manualInput[currentQuestion.id]?.trim());
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4 animate-in fade-in duration-300">
@@ -214,6 +257,32 @@ export default function HealthIntakeModal({ questions, onSubmit, onClose }: Heal
                   Select all that apply
                 </p>
               )}
+
+              {/* Manual text input option */}
+              <div className="space-y-2 pt-2 border-t border-gray-200 dark:border-gray-700">
+                <p className="text-xs text-gray-500 dark:text-gray-400 font-medium">
+                  Or type your own answer:
+                </p>
+                <input
+                  type="text"
+                  value={currentQuestion ? (manualInput[currentQuestion.id] || '') : ''}
+                  onChange={(e) => {
+                    if (!currentQuestion) return;
+                    const value = e.target.value;
+                    setManualInput({ ...manualInput, [currentQuestion.id]: value });
+                    // If user types, save it as the answer
+                    if (value.trim()) {
+                      setAnswers({ ...answers, [currentQuestion.id]: value.trim() });
+                      // Clear option selections when typing
+                      if (isMultiSelect) {
+                        setSelectedMultiple(new Set());
+                      }
+                    }
+                  }}
+                  placeholder="Type your answer here..."
+                  className="w-full px-4 py-2.5 text-sm rounded-lg border-2 border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 text-gray-900 dark:text-white placeholder:text-gray-400 focus:border-primary focus:ring-2 focus:ring-primary/20 outline-none transition-all"
+                />
+              </div>
             </div>
           )}
         </div>

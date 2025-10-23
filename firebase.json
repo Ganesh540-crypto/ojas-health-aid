@@ -5,5 +5,64 @@
   "firestore": {
     "rules": "firestore.rules",
     "indexes": "firestore.indexes.json"
-  }
+  },
+  "functions": {
+    "source": "functions"
+  },
+  "hosting": [
+    {
+      "target": "landing",
+      "public": "dist",
+      "redirects": [
+        { "source": "/login", "destination": "https://app.ojasai.co.in/login", "type": 301 },
+        { "source": "/signup", "destination": "https://app.ojasai.co.in/signup", "type": 301 },
+        { "source": "/verify-email", "destination": "https://app.ojasai.co.in/verify-email", "type": 301 },
+        { "source": "/email-action", "destination": "https://app.ojasai.co.in/email-action", "type": 301 },
+        { "source": "/onboarding", "destination": "https://app.ojasai.co.in/onboarding", "type": 301 },
+        { "source": "/app", "destination": "https://app.ojasai.co.in/app", "type": 301 },
+        { "source": "/app/**", "destination": "https://app.ojasai.co.in/app", "type": 301 },
+        { "source": "/voice", "destination": "https://app.ojasai.co.in/voice", "type": 301 },
+        { "source": "/flow-demo", "destination": "https://app.ojasai.co.in/flow-demo", "type": 301 },
+        { "source": "/pulse", "destination": "https://app.ojasai.co.in/pulse", "type": 301 },
+        { "source": "/pulse/**", "destination": "https://app.ojasai.co.in/pulse", "type": 301 },
+        { "source": "/chat/**", "destination": "https://app.ojasai.co.in/app", "type": 301 },
+        { "source": "/app/privacy", "destination": "https://app.ojasai.co.in/app/privacy", "type": 301 },
+        { "source": "/app/terms", "destination": "https://app.ojasai.co.in/app/terms", "type": 301 }
+      ],
+      "rewrites": [
+        {
+          "source": "**",
+          "destination": "/index.html"
+        }
+      ],
+      "ignore": [
+        "firebase.json",
+        "**/.*",
+        "**/node_modules/**"
+      ]
+    },
+    {
+      "target": "app",
+      "public": "dist",
+      "redirects": [
+        { "source": "/", "destination": "/app", "type": 301 },
+        { "source": "/about", "destination": "https://ojasai.co.in/about", "type": 301 },
+        { "source": "/contact", "destination": "https://ojasai.co.in/contact", "type": 301 },
+        { "source": "/faq", "destination": "https://ojasai.co.in/faq", "type": 301 },
+        { "source": "/privacy", "destination": "https://ojasai.co.in/privacy", "type": 301 },
+        { "source": "/terms", "destination": "https://ojasai.co.in/terms", "type": 301 }
+      ],
+      "rewrites": [
+        {
+          "source": "**",
+          "destination": "/index.html"
+        }
+      ],
+      "ignore": [
+        "firebase.json",
+        "**/.*",
+        "**/node_modules/**"
+      ]
+    }
+  ]
 }

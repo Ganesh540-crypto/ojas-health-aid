@@ -1,0 +1,36 @@
+rules_version = '2';
+
+// Firestore Rules for PULSE Database
+// Database: (default) in us-central1
+// Collections: pulse_sources, pulse_articles, pulse_config, pulse_query_log
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    
+    // Pulse V2 collections - Public read, Cloud Functions write only
+    match /pulse_sources/{document=**} {
+      allow read: if true;
+      allow write: if false; // Only Cloud Functions can write
+    }
+    
+    match /pulse_articles/{document=**} {
+      allow read: if true;
+      allow write: if false; // Only Cloud Functions can write
+    }
+    
+    match /pulse_config/{document=**} {
+      allow read: if true;
+      allow write: if false; // Only Cloud Functions can write
+    }
+    
+    match /pulse_query_log/{document=**} {
+      allow read: if true;
+      allow write: if false; // Only Cloud Functions can write
+    }
+    
+    // Default deny for other collections
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

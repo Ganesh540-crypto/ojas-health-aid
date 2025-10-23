@@ -1,5 +1,18 @@
 {
   "projects": {
     "default": "ojas-ai"
-  }
+  },
+  "targets": {
+    "ojas-ai": {
+      "hosting": {
+        "landing": [
+          "ojasai-landing"
+        ],
+        "app": [
+          "ojasai-app"
+        ]
+      }
+    }
+  },
+  "etags": {}
 }
