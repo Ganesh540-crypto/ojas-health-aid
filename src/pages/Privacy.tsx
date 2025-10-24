@@ -1,4 +1,5 @@
 import React from 'react';
+import { Helmet } from 'react-helmet-async';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { Search, ArrowUp, ArrowDown, X } from 'lucide-react';
@@ -54,6 +55,18 @@ export default function Privacy() {
     jump(1);
   };
   return (
+    <>
+      <Helmet>
+        <title>Privacy Policy – Ojas AI (App)</title>
+        <meta name="description" content="How we collect, use, and protect your data in the Ojas app." />
+        <link rel="canonical" href="https://app.ojasai.co.in/app/privacy" />
+        <meta property="og:title" content="Privacy Policy – Ojas AI (App)" />
+        <meta property="og:description" content="Details of data practices for the Ojas application." />
+        <meta property="og:type" content="website" />
+        <meta property="og:url" content="https://app.ojasai.co.in/app/privacy" />
+        <meta property="og:image" content="https://ojasai.co.in/favicon.ico" />
+        <meta name="twitter:card" content="summary_large_image" />
+      </Helmet>
     <main className="min-h-screen">
       <section className="relative w-full border-b">
         <div className="relative mx-auto max-w-5xl px-6 pt-16 pb-12">
@@ -224,5 +237,6 @@ export default function Privacy() {
         `}</style>
       </section>
     </main>
+    </>
   );
 }

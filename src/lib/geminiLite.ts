@@ -9,7 +9,7 @@ const API_KEY = (import.meta.env?.VITE_GEMINI_API_KEY as string) || '';
 
 class GeminiLiteService {
   private ai: GoogleGenAI;
-  private model: string = 'gemini-2.5-flash-lite-preview-09-2025';
+  private model: string = 'gemini-flash-lite-latest';
 
   constructor() {
     if (!API_KEY) {

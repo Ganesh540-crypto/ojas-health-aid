@@ -1,9 +1,35 @@
 import React from 'react';
+import { Helmet } from 'react-helmet-async';
 import { LandingHeader } from './components/LandingHeader';
 import { LandingFooter } from './components/LandingFooter';
 
 export default function LandingPrivacy() {
   return (
+    <>
+      <Helmet>
+        <title>Privacy Policy – Ojas AI</title>
+        <meta name="description" content="How Ojas AI collects, uses, and protects your data. Privacy-first by design." />
+        <link rel="canonical" href="https://ojasai.co.in/privacy" />
+        <meta property="og:title" content="Privacy Policy – Ojas AI" />
+        <meta property="og:description" content="Learn about Ojas AI’s data practices and privacy protections." />
+        <meta property="og:type" content="website" />
+        <meta property="og:url" content="https://ojasai.co.in/privacy" />
+        <meta property="og:image" content="https://ojasai.co.in/favicon.ico" />
+        <meta name="twitter:card" content="summary_large_image" />
+        <script type="application/ld+json">{JSON.stringify({
+          "@context": "https://schema.org",
+          "@type": "Organization",
+          "name": "Ojas AI",
+          "url": "https://ojasai.co.in/",
+          "logo": "https://ojasai.co.in/favicon.ico"
+        })}</script>
+        <script type="application/ld+json">{JSON.stringify({
+          "@context": "https://schema.org",
+          "@type": "WebPage",
+          "name": "Privacy Policy – Ojas AI",
+          "url": "https://ojasai.co.in/privacy"
+        })}</script>
+      </Helmet>
     <div className="min-h-screen bg-background">
       <LandingHeader />
       
@@ -103,5 +129,6 @@ export default function LandingPrivacy() {
       
       <LandingFooter />
     </div>
+    </>
   );
 }

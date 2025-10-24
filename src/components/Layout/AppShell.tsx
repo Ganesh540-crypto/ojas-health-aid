@@ -26,6 +26,7 @@ import { useToast } from "@/hooks/use-toast";
 import SettingsDialog from "@/components/Settings/SettingsDialog";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { getPulseCache, isPulseCacheFresh, prefetchPulse } from "@/lib/pulseCache";
+import { usePrefetch } from "@/lib/usePrefetch";
 
 export default function AppShell() {
   const [chats, setChats] = useState(chatStore.list());
@@ -34,6 +35,9 @@ export default function AppShell() {
   // React 19: Defer chat list updates for instant UI response
   const deferredChats = useDeferredValue(chats);
   const { toast } = useToast();
+  // Prefetch route chunks on hover/focus for snappier navigation
+  const indexPrefetch = usePrefetch(() => import("@/pages/Index"));
+  const pulsePrefetch = usePrefetch(() => import("@/pages/Pulse"));
   // Collapsible Home sidebar state
   const [homeOpen, setHomeOpen] = useState(false); // pinned open by click
   const [homeHover, setHomeHover] = useState(false); // temporarily open on hover
@@ -191,7 +195,10 @@ export default function AppShell() {
           onMouseEnter={() => {
             cancelHoverCloseDelay();
             setHomeHover(true);
+            // Prefetch main chat route chunk
+            try { (async () => { await import('@/pages/Index'); })(); } catch {}
           }}
+          onFocus={indexPrefetch.onFocus}
           onMouseLeave={startHoverCloseDelay}
           role="button"
           aria-pressed={isHomeVisible}
@@ -215,7 +222,13 @@ export default function AppShell() {
         <div
           className="flex flex-col items-center gap-1.5 py-2 px-2 rounded-lg transition-all cursor-pointer"
           onClick={() => navigate('/pulse')}
-          onMouseEnter={() => { const cache = getPulseCache(); if (!isPulseCacheFresh(cache)) prefetchPulse().catch(()=>{}); }}
+          onMouseEnter={() => {
+            // Prefetch pulse data and route chunk
+            const cache = getPulseCache();
+            if (!isPulseCacheFresh(cache)) prefetchPulse().catch(()=>{});
+            try { (async () => { await import('@/pages/Pulse'); })(); } catch {}
+          }}
+          onFocus={pulsePrefetch.onFocus}
           role="button"
           aria-label="Pulse"
         >

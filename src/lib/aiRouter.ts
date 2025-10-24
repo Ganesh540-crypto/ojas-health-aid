@@ -9,7 +9,8 @@ import { isSubstanceQuery, sanitizeSubstanceContent, needsFreshData, getHealthCo
 import { profileStore } from './profileStore';
 import { languageStore } from './languageStore';
 import { azureTranslator } from './azureTranslator';
-import { auth } from './firebase';
+import { auth, db } from './firebase';
+import { ref, get } from 'firebase/database';
 const API_KEY: string = (import.meta.env?.VITE_GEMINI_API_KEY as string) || '';
 
 type Decision = 'casual' | 'critical';
@@ -29,7 +30,7 @@ interface RouteResult {
 
 class AIRouter {
   private ai: GoogleGenAI;
-  private model: string = 'gemini-2.5-flash-lite-preview-09-2025';
+  private model: string = 'gemini-flash-lite-latest';
 
   constructor() {
     if (!API_KEY) {
@@ -119,7 +120,7 @@ class AIRouter {
               let content = await this.addSafetyNoticeIfNeeded(resp.content || '', message);
               memoryStore.addAssistant(content);
               if (chatId) this.updateChatTitle(chatId, message, content);
-              return { content, isHealthRelated: true, decision: 'critical', modelUsed: 'gemini-2.5-flash-preview-09-2025', sources: resp.sources } as RouteResult;
+              return { content, isHealthRelated: true, decision: 'critical', modelUsed: 'gemini-flash-latest', sources: resp.sources } as RouteResult;
             })
           };
         }
@@ -246,7 +247,7 @@ class AIRouter {
               if (chatId) this.updateChatTitle(chatId, message, content);
               this.scheduleBackgroundSummary(chatId, message, content);
               
-              return { content, isHealthRelated: true, decision: 'critical', modelUsed: 'gemini-2.5-flash-preview-09-2025', sources: resp.sources } as RouteResult;
+              return { content, isHealthRelated: true, decision: 'critical', modelUsed: 'gemini-flash-latest', sources: resp.sources } as RouteResult;
             })
           };
         }
@@ -282,7 +283,7 @@ class AIRouter {
             memoryStore.addAssistant(content);
             if (chatId) this.updateChatTitle(chatId, message, content);
             this.scheduleBackgroundSummary(chatId, message, content);
-            return { content, isHealthRelated: false, decision: 'casual', modelUsed: 'gemini-2.5-flash-lite-preview-09-2025', sources: resp.sources } as RouteResult;
+            return { content, isHealthRelated: false, decision: 'casual', modelUsed: 'gemini-flash-lite-latest', sources: resp.sources } as RouteResult;
           })
         };
       }
@@ -361,7 +362,7 @@ class AIRouter {
       // Inject Safety Notice for substance/danger queries
       const labeled = await this.addSafetyNoticeIfNeeded(resp.content, message);
       memoryStore.addAssistant(labeled);
-      return { ...resp, content: labeled, isHealthRelated: true, decision: 'critical', modelUsed: 'gemini-2.5-flash-preview-09-2025', sources: resp.sources };
+      return { ...resp, content: labeled, isHealthRelated: true, decision: 'critical', modelUsed: 'gemini-flash-latest', sources: resp.sources };
     }
 
     // FAST DETERMINISTIC HEALTH CLASSIFICATION (no blocking LLM call)
@@ -425,7 +426,7 @@ class AIRouter {
           content: intakeNotice,
           isHealthRelated: true,
           decision: 'critical',
-          modelUsed: 'gemini-2.5-flash-preview-09-2025',
+          modelUsed: 'gemini-flash-latest',
           intake,
           awaitingIntakeAnswers: true
         };
@@ -461,7 +462,7 @@ class AIRouter {
         this.updateChatTitle(chatId, message, contentH);
       }
       
-      return { ...resp, content: contentH, isHealthRelated: true, decision: 'critical', modelUsed: 'gemini-2.5-flash-preview-09-2025', sources: resp.sources };
+      return { ...resp, content: contentH, isHealthRelated: true, decision: 'critical', modelUsed: 'gemini-flash-latest', sources: resp.sources };
     }
 
     // Load user memories for lite model
@@ -487,7 +488,7 @@ class AIRouter {
     
     console.log('✅ Non-health route completed', {
       decision: 'casual',
-      modelUsed: 'gemini-2.5-flash-lite-preview-09-2025',
+      modelUsed: 'gemini-flash-lite-latest',
       contentLength: labeled.length,
       sourcesCount: liteResp.sources?.length || 0
     });
@@ -496,7 +497,7 @@ class AIRouter {
       content: labeled, 
       isHealthRelated: false, 
       decision: 'casual', 
-      modelUsed: 'gemini-2.5-flash-lite-preview-09-2025', 
+      modelUsed: 'gemini-flash-lite-latest', 
       sources: liteResp.sources 
     };
   }
@@ -599,8 +600,6 @@ Respond with ONLY one word: YES or NO`;
       if (!userId) return '';
 
       console.log('📥 [AIRouter] Loading user memory context...');
-      const { ref, get } = await import('firebase/database');
-      const { db } = await import('./firebase');
 
       const [profileSnap, factsSnap] = await Promise.all([
         get(ref(db, `users/${userId}/memory/profile`)),
@@ -674,7 +673,6 @@ Response summary: ${aiResponse.slice(0, 200)}
 
 Title:`;
       
-      const { geminiLiteService } = await import('./geminiLite');
       // Use lite model to generate title
       const titleResponse = await geminiLiteService.generateResponse(prompt, { forceSearch: false });
       const title = titleResponse.content.trim().slice(0, 50);

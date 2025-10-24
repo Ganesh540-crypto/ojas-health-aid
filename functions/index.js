@@ -71,6 +71,75 @@ function createTransport() {
   });
 }
 
+// Azure Translator proxy over Firebase Functions (replaces Netlify function)
+const AZURE_TRANSLATOR_KEY = process.env.AZURE_TRANSLATOR_KEY || '';
+const AZURE_TRANSLATOR_REGION = process.env.AZURE_TRANSLATOR_REGION || '';
+const AZURE_TRANSLATOR_ENDPOINT = process.env.AZURE_TRANSLATOR_ENDPOINT || 'https://api.cognitive.microsofttranslator.com';
+
+function buildTranslateUrl(base) {
+  try {
+    const u = new URL(base);
+    const host = u.host.toLowerCase();
+    const hasVersionPath = /\/translator\/text\/v3\.0/i.test(u.pathname);
+    if (hasVersionPath) {
+      const pathname = u.pathname.replace(/\/?$/, '/');
+      return new URL(pathname + 'translate', u.origin);
+    }
+    if (host === 'api.cognitive.microsofttranslator.com') {
+      return new URL('/translate', u.origin);
+    }
+    return new URL('/translator/text/v3.0/translate', u.origin);
+  } catch {
+    return new URL('/translate', 'https://api.cognitive.microsofttranslator.com');
+  }
+}
+
+exports.translateText = functions.https.onRequest(async (req, res) => {
+  if (req.method !== 'POST') {
+    res.status(405).send('Method Not Allowed');
+    return;
+  }
+  if (!AZURE_TRANSLATOR_KEY || !AZURE_TRANSLATOR_REGION) {
+    res.status(500).send('Server missing AZURE_TRANSLATOR_KEY or AZURE_TRANSLATOR_REGION');
+    return;
+  }
+  try {
+    const { texts, to, from } = typeof req.body === 'string' ? JSON.parse(req.body) : req.body || {};
+    if (!Array.isArray(texts) || typeof to !== 'string' || !to) {
+      res.status(400).send('Invalid payload. Expected { texts: string[], to: string, from?: string }');
+      return;
+    }
+    const url = buildTranslateUrl(AZURE_TRANSLATOR_ENDPOINT);
+    url.searchParams.set('api-version', '3.0');
+    url.searchParams.set('to', to);
+    if (from) url.searchParams.set('from', from);
+
+    const chunkSize = 90;
+    const results = [];
+    for (let i = 0; i < texts.length; i += chunkSize) {
+      const slice = texts.slice(i, i + chunkSize);
+      const r = await fetch(url.toString(), {
+        method: 'POST',
+        headers: {
+          'Ocp-Apim-Subscription-Key': AZURE_TRANSLATOR_KEY,
+          'Ocp-Apim-Subscription-Region': AZURE_TRANSLATOR_REGION,
+          'Content-Type': 'application/json; charset=UTF-8'
+        },
+        body: JSON.stringify(slice.map((t) => ({ Text: t || '' })))
+      });
+      if (!r.ok) {
+        res.status(r.status).send(await r.text());
+        return;
+      }
+      const data = await r.json();
+      const translated = (data || []).map((row, idx) => row?.translations?.[0]?.text ?? slice[idx] ?? '');
+      results.push(...translated);
+    }
+    res.status(200).json(results);
+  } catch (e) {
+    res.status(500).send(`Translator proxy error: ${e?.message || 'unknown'}`);
+  }
+});
 // Legacy OTP functions removed
 
 // HTTP endpoint to generate Firebase email verification link and send via SMTP
@@ -84,7 +153,7 @@ exports.sendVerifyLink = functions.https.onRequest(async (req, res) => {
     }
 
     const actionCodeSettings = {
-      url: 'https://ojasai.co.in/email-action',
+      url: 'https://app.ojasai.co.in/email-action',
       handleCodeInApp: false,
     };
     const link = await admin.auth().generateEmailVerificationLink(email, actionCodeSettings);

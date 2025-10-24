@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { Helmet } from 'react-helmet-async';
 import { Mail, MapPin, Phone } from 'lucide-react';
 import { Card, CardContent } from '@/components/ui/card';
 import { LandingHeader } from './components/LandingHeader';
@@ -27,6 +28,37 @@ export default function LandingContact() {
   };
 
   return (
+    <>
+      <Helmet>
+        <title>Contact Ojas – We’re here to help</title>
+        <meta name="description" content="Have questions about Ojas AI? Contact our team and we’ll get back within 24 hours." />
+        <link rel="canonical" href="https://ojasai.co.in/contact" />
+        <meta property="og:title" content="Contact Ojas – We’re here to help" />
+        <meta property="og:description" content="Reach out to the Ojas team for questions, partnerships, or support." />
+        <meta property="og:type" content="website" />
+        <meta property="og:url" content="https://ojasai.co.in/contact" />
+        <meta property="og:image" content="https://ojasai.co.in/favicon.ico" />
+        <meta name="twitter:card" content="summary_large_image" />
+        <script type="application/ld+json">{JSON.stringify({
+          "@context": "https://schema.org",
+          "@type": "Organization",
+          "name": "Ojas AI",
+          "url": "https://ojasai.co.in/",
+          "logo": "https://ojasai.co.in/favicon.ico",
+          "contactPoint": [{
+            "@type": "ContactPoint",
+            "contactType": "customer support",
+            "email": "hi@ojasai.co.in",
+            "areaServed": "IN"
+          }]
+        })}</script>
+        <script type="application/ld+json">{JSON.stringify({
+          "@context": "https://schema.org",
+          "@type": "ContactPage",
+          "name": "Contact Ojas",
+          "url": "https://ojasai.co.in/contact"
+        })}</script>
+      </Helmet>
     <div className="min-h-screen bg-background">
       <LandingHeader />
       
@@ -202,5 +234,6 @@ export default function LandingContact() {
       
       <LandingFooter />
     </div>
+    </>
   );
 }

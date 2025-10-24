@@ -1,4 +1,5 @@
 import React from 'react';
+import { Helmet } from 'react-helmet-async';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { Search, ArrowUp, ArrowDown, X } from 'lucide-react';
@@ -54,6 +55,18 @@ export default function Terms() {
     jump(1);
   };
   return (
+    <>
+      <Helmet>
+        <title>Terms of Service – Ojas AI (App)</title>
+        <meta name="description" content="The rules of using Ojas and responsibilities that keep everyone safe." />
+        <link rel="canonical" href="https://app.ojasai.co.in/app/terms" />
+        <meta property="og:title" content="Terms of Service – Ojas AI (App)" />
+        <meta property="og:description" content="Review the terms and conditions for using the Ojas application." />
+        <meta property="og:type" content="website" />
+        <meta property="og:url" content="https://app.ojasai.co.in/app/terms" />
+        <meta property="og:image" content="https://ojasai.co.in/favicon.ico" />
+        <meta name="twitter:card" content="summary_large_image" />
+      </Helmet>
     <main className="min-h-screen">
       <section className="relative w-full border-b">
         <div className="relative mx-auto max-w-5xl px-6 pt-16 pb-12">
@@ -212,5 +225,6 @@ export default function Terms() {
         `}</style>
       </section>
     </main>
+    </>
   );
 }

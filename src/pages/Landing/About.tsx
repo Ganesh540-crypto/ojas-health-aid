@@ -1,10 +1,36 @@
 import React from 'react';
+import { Helmet } from 'react-helmet-async';
 import { LandingHeader } from './components/LandingHeader';
 import { LandingFooter } from './components/LandingFooter';
 import { Users, Target, Award, Heart, Shield, Zap } from 'lucide-react';
 
 export default function LandingAbout() {
   return (
+    <>
+      <Helmet>
+        <title>About Ojas – AI Health Assistant</title>
+        <meta name="description" content="Learn about Ojas AI, a professional healthcare assistant focused on privacy, evidence-based guidance, and accessibility." />
+        <link rel="canonical" href="https://ojasai.co.in/about" />
+        <meta property="og:title" content="About Ojas – AI Health Assistant" />
+        <meta property="og:description" content="Our mission, values, and the team behind Ojas AI, built by VISTORA TRAYANA LLP." />
+        <meta property="og:type" content="website" />
+        <meta property="og:url" content="https://ojasai.co.in/about" />
+        <meta property="og:image" content="https://ojasai.co.in/favicon.ico" />
+        <meta name="twitter:card" content="summary_large_image" />
+        <script type="application/ld+json">{JSON.stringify({
+          "@context": "https://schema.org",
+          "@type": "Organization",
+          "name": "Ojas AI",
+          "url": "https://ojasai.co.in/",
+          "logo": "https://ojasai.co.in/favicon.ico"
+        })}</script>
+        <script type="application/ld+json">{JSON.stringify({
+          "@context": "https://schema.org",
+          "@type": "AboutPage",
+          "name": "About Ojas – AI Health Assistant",
+          "url": "https://ojasai.co.in/about"
+        })}</script>
+      </Helmet>
     <div className="min-h-screen bg-background">
       <LandingHeader />
       
@@ -244,5 +270,6 @@ export default function LandingAbout() {
 
       <LandingFooter />
     </div>
+    </>
   );
 }

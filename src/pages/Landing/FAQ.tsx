@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { Helmet } from 'react-helmet-async';
 import { ChevronDown } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { LandingHeader } from './components/LandingHeader';
@@ -55,6 +56,39 @@ export default function LandingFAQ() {
   };
 
   return (
+    <>
+      <Helmet>
+        <title>Ojas – Frequently Asked Questions</title>
+        <meta name="description" content="Find answers about Ojas AI: what it is, accuracy, privacy, availability, and how to get started." />
+        <link rel="canonical" href="https://ojasai.co.in/faq" />
+        <meta property="og:title" content="Ojas – Frequently Asked Questions" />
+        <meta property="og:description" content="Answers to common questions about Ojas AI and its health guidance." />
+        <meta property="og:type" content="website" />
+        <meta property="og:url" content="https://ojasai.co.in/faq" />
+        <meta property="og:image" content="https://ojasai.co.in/favicon.ico" />
+        <meta name="twitter:card" content="summary_large_image" />
+        <script type="application/ld+json">{JSON.stringify({
+          "@context": "https://schema.org",
+          "@type": "FAQPage",
+          "mainEntity": [
+            {
+              "@type": "Question",
+              "name": "What is Ojas AI?",
+              "acceptedAnswer": { "@type": "Answer", "text": "Ojas is an AI-powered health assistant designed to provide personalized health guidance, wellness tips, and instant answers to your health questions." }
+            },
+            {
+              "@type": "Question",
+              "name": "Is Ojas a replacement for medical professionals?",
+              "acceptedAnswer": { "@type": "Answer", "text": "No. Ojas is not a replacement for professional medical advice, diagnosis, or treatment. Always consult qualified healthcare providers for medical concerns." }
+            },
+            {
+              "@type": "Question",
+              "name": "How does Ojas protect my privacy?",
+              "acceptedAnswer": { "@type": "Answer", "text": "Ojas is built with privacy by design. We keep your conversations private and secure, and implement modern security practices to protect your data." }
+            }
+          ]
+        })}</script>
+      </Helmet>
     <div className="min-h-screen bg-background">
       <LandingHeader />
       
@@ -114,5 +148,6 @@ export default function LandingFAQ() {
       
       <LandingFooter />
     </div>
+    </>
   );
 }

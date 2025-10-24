@@ -1,9 +1,35 @@
 import React from 'react';
+import { Helmet } from 'react-helmet-async';
 import { LandingHeader } from './components/LandingHeader';
 import { LandingFooter } from './components/LandingFooter';
 
 export default function LandingTerms() {
   return (
+    <>
+      <Helmet>
+        <title>Terms of Service – Ojas AI</title>
+        <meta name="description" content="The terms of using Ojas AI, outlining responsibilities and acceptable use." />
+        <link rel="canonical" href="https://ojasai.co.in/terms" />
+        <meta property="og:title" content="Terms of Service – Ojas AI" />
+        <meta property="og:description" content="Understand the rules and responsibilities for using Ojas AI." />
+        <meta property="og:type" content="website" />
+        <meta property="og:url" content="https://ojasai.co.in/terms" />
+        <meta property="og:image" content="https://ojasai.co.in/favicon.ico" />
+        <meta name="twitter:card" content="summary_large_image" />
+        <script type="application/ld+json">{JSON.stringify({
+          "@context": "https://schema.org",
+          "@type": "Organization",
+          "name": "Ojas AI",
+          "url": "https://ojasai.co.in/",
+          "logo": "https://ojasai.co.in/favicon.ico"
+        })}</script>
+        <script type="application/ld+json">{JSON.stringify({
+          "@context": "https://schema.org",
+          "@type": "WebPage",
+          "name": "Terms of Service – Ojas AI",
+          "url": "https://ojasai.co.in/terms"
+        })}</script>
+      </Helmet>
     <div className="min-h-screen bg-background">
       <LandingHeader />
       
@@ -106,5 +132,6 @@ export default function LandingTerms() {
       
       <LandingFooter />
     </div>
+    </>
   );
 }

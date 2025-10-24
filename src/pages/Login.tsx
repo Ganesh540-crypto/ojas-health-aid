@@ -1,8 +1,9 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Button } from '@/components/ui/button';
 import { loginWithEmail, loginWithGoogle, sendReset } from '@/lib/auth';
 import { useNavigate, Link } from 'react-router-dom';
 import { Eye, EyeOff, ArrowLeftRight } from 'lucide-react';
+import { auth } from '@/lib/firebase';
 
 const GoogleIcon = () => (
   <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 48 48">
@@ -26,6 +27,14 @@ export default function Login() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const navigate = useNavigate();
+
+  // If the user is already signed in (persisted session), redirect immediately
+  useEffect(() => {
+    const unsub = auth.onAuthStateChanged((user) => {
+      if (user) navigate('/app', { replace: true });
+    });
+    return () => unsub();
+  }, [navigate]);
 
   const onSubmit = async (e: React.FormEvent) => {
     e.preventDefault();

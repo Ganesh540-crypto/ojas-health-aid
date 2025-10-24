@@ -3,6 +3,9 @@ import { Link } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
 import { Menu, X } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { usePrefetch } from '@/lib/usePrefetch';
+import { auth } from '@/lib/firebase';
+import type { User } from 'firebase/auth';
 
 const menuItems = [
   { name: 'Features', href: '#features', isScroll: true },
@@ -14,6 +17,11 @@ const menuItems = [
 export const LandingHeader = () => {
   const [menuState, setMenuState] = useState(false);
   const [isScrolled, setIsScrolled] = useState(false);
+  const [currentUser, setCurrentUser] = useState<User | null>(null);
+  const [authLoading, setAuthLoading] = useState(true);
+  const loginPrefetch = usePrefetch(() => import('@/pages/Login'));
+  const signupPrefetch = usePrefetch(() => import('@/pages/Signup'));
+  const aboutPrefetch = usePrefetch(() => import('@/pages/Landing/About'));
 
   useEffect(() => {
     const handleScroll = () => {
@@ -21,6 +29,15 @@ export const LandingHeader = () => {
     };
     window.addEventListener('scroll', handleScroll);
     return () => window.removeEventListener('scroll', handleScroll);
+  }, []);
+
+  // Check Firebase Auth state
+  useEffect(() => {
+    const unsubscribe = auth.onAuthStateChanged((user) => {
+      setCurrentUser(user);
+      setAuthLoading(false);
+    });
+    return () => unsubscribe();
   }, []);
 
   const handleMenuClick = (href: string, isScroll: boolean, e?: React.MouseEvent) => {
@@ -86,6 +103,7 @@ export const LandingHeader = () => {
                         <Link 
                           to={item.href}
                           onClick={() => window.scrollTo({ top: 0, behavior: 'smooth' })}
+                          {...aboutPrefetch}
                           className="text-sm font-medium text-foreground hover:text-primary transition-colors"
                         >
                           {item.name}
@@ -123,34 +141,57 @@ export const LandingHeader = () => {
                 </ul>
               </div>
               <div className="flex w-full flex-col space-y-3 sm:flex-row sm:gap-3 sm:space-y-0 md:w-fit">
-                <Button
-                  asChild
-                  variant="ghost"
-                  size="sm"
-                  className={cn(isScrolled && 'lg:hidden')}
-                >
-                  <a href={window.location.hostname === 'localhost' ? '/login' : 'https://app.ojasai.co.in/login'}>
-                    <span>Login</span>
-                  </a>
-                </Button>
-                <Button
-                  asChild
-                  size="sm"
-                  className={cn(isScrolled && 'lg:hidden')}
-                >
-                  <a href={window.location.hostname === 'localhost' ? '/signup' : 'https://app.ojasai.co.in/signup'}>
-                    <span>Sign Up</span>
-                  </a>
-                </Button>
-                <Button
-                  asChild
-                  size="sm"
-                  className={cn(isScrolled ? 'lg:inline-flex' : 'hidden')}
-                >
-                  <a href={window.location.hostname === 'localhost' ? '/signup' : 'https://app.ojasai.co.in/signup'}>
-                    <span>Get Started</span>
-                  </a>
-                </Button>
+                {!authLoading && (
+                  currentUser ? (
+                    // User is logged in - show "Go to App" button
+                    <Button
+                      asChild
+                      size="sm"
+                    >
+                      <a href={window.location.hostname === 'localhost' ? '/app' : 'https://app.ojasai.co.in/app'}>
+                        <span>Go to App</span>
+                      </a>
+                    </Button>
+                  ) : (
+                    // User is not logged in - show Login/Signup buttons
+                    <>
+                      <Button
+                        asChild
+                        variant="ghost"
+                        size="sm"
+                        className={cn(isScrolled && 'lg:hidden')}
+                      >
+                        <a href={window.location.hostname === 'localhost' ? '/login' : 'https://app.ojasai.co.in/login'}
+                           {...(window.location.hostname === 'localhost' ? loginPrefetch : {})}
+                        >
+                          <span>Login</span>
+                        </a>
+                      </Button>
+                      <Button
+                        asChild
+                        size="sm"
+                        className={cn(isScrolled && 'lg:hidden')}
+                      >
+                        <a href={window.location.hostname === 'localhost' ? '/signup' : 'https://app.ojasai.co.in/signup'}
+                           {...(window.location.hostname === 'localhost' ? signupPrefetch : {})}
+                        >
+                          <span>Sign Up</span>
+                        </a>
+                      </Button>
+                      <Button
+                        asChild
+                        size="sm"
+                        className={cn(isScrolled ? 'lg:inline-flex' : 'hidden')}
+                      >
+                        <a href={window.location.hostname === 'localhost' ? '/signup' : 'https://app.ojasai.co.in/signup'}
+                           {...(window.location.hostname === 'localhost' ? signupPrefetch : {})}
+                        >
+                          <span>Get Started</span>
+                        </a>
+                      </Button>
+                    </>
+                  )
+                )}
               </div>
             </div>
           </div>

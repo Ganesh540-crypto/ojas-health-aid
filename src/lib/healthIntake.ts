@@ -19,7 +19,7 @@ export interface HealthIntakePayload {
 
 class HealthIntakeService {
   private ai: GoogleGenAI;
-  private model = 'gemini-2.5-flash-preview-09-2025';
+  private model = 'gemini-flash-latest';
   constructor() {
     if (!API_KEY) console.warn('Gemini API key missing for health intake');
     this.ai = new GoogleGenAI({ apiKey: API_KEY });

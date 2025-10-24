@@ -3,33 +3,34 @@ import { Toaster as Sonner } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { BrowserRouter, Routes, Route } from "react-router-dom";
-import Index from "./pages/Index";
-import Onboarding from "./pages/Onboarding";
-import RequireAuth from "@/components/Auth/RequireAuth";
-import RequireProfile from "@/components/Auth/RequireProfile";
 import React, { useState, useEffect } from "react";
 import { CommandDialog, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command";
-import AppShell from "@/components/Layout/AppShell";
-import { auth } from "@/lib/firebase";
-import { chatStore } from "@/lib/chatStore";
+import RequireAuth from "@/components/Auth/RequireAuth";
+import RequireProfile from "@/components/Auth/RequireProfile";
+import { HelmetProvider } from 'react-helmet-async';
+// Lazy routes/components to reduce initial bundle
+const AppShell = React.lazy(() => import("@/components/Layout/AppShell"));
+const IndexPage = React.lazy(() => import("./pages/Index"));
+const Onboarding = React.lazy(() => import("./pages/Onboarding"));
+// chatStore is lazy-imported inside effects for app routes only
 const LoginPage = React.lazy(() => import('./pages/Login'));
 const SignupPage = React.lazy(() => import('./pages/Signup'));
 import NotFound from "./pages/NotFound";
-import VoiceMode from "./pages/VoiceMode";
-import FlowDemo from "./pages/FlowDemo";
-import Pulse from "./pages/Pulse";
-import { prefetchPulse, getPulseCache, isPulseCacheFresh } from "@/lib/pulseCache";
-import PulseArticle from "./pages/PulseArticle";
-import Privacy from "./pages/Privacy";
-import Terms from "./pages/Terms";
-import LandingPrivacy from "./pages/Landing/Privacy";
-import LandingTerms from "./pages/Landing/Terms";
-import LandingContact from "./pages/Landing/Contact";
-import LandingFAQ from "./pages/Landing/FAQ";
-import LandingAbout from "./pages/Landing/About";
-import VerifyEmail from "./pages/VerifyEmail";
-import EmailAction from "./pages/EmailAction";
-import LandingPage from "./pages/Landing";
+const VoiceMode = React.lazy(() => import("./pages/VoiceMode"));
+const FlowDemo = React.lazy(() => import("./pages/FlowDemo"));
+const Pulse = React.lazy(() => import("./pages/Pulse"));
+// pulseCache is lazy-imported before use
+const PulseArticle = React.lazy(() => import("./pages/PulseArticle"));
+const Privacy = React.lazy(() => import("./pages/Privacy"));
+const Terms = React.lazy(() => import("./pages/Terms"));
+const LandingPrivacy = React.lazy(() => import("./pages/Landing/Privacy"));
+const LandingTerms = React.lazy(() => import("./pages/Landing/Terms"));
+const LandingContact = React.lazy(() => import("./pages/Landing/Contact"));
+const LandingFAQ = React.lazy(() => import("./pages/Landing/FAQ"));
+const LandingAbout = React.lazy(() => import("./pages/Landing/About"));
+const VerifyEmail = React.lazy(() => import("./pages/VerifyEmail"));
+const EmailAction = React.lazy(() => import("./pages/EmailAction"));
+const LandingPage = React.lazy(() => import("./pages/Landing"));
 
 const queryClient = new QueryClient();
 
@@ -41,21 +42,60 @@ const App = () => {
   const [showBootOverlay, setShowBootOverlay] = useState(false);
   const [bootError, setBootError] = useState<string | null>(null);
 
-  // Early auth + chat hydration gate to avoid transient blank states.
+  // Early auth + chat hydration gate for app routes only (keeps landing bundle light)
   useEffect(() => {
-    // Using two timers: a no-op micro start (kept for type consistency) and the fallback timer.
-    const timeout: number = window.setTimeout(() => {}, 0);
-    const unsub = auth.onAuthStateChanged((u) => {
-      // Do not gate UI on cloud hydration; allow app to render immediately
+    const landingPaths = new Set(['/', '/about', '/contact', '/faq', '/privacy', '/terms']);
+    const path = window.location.pathname;
+    // If landing-only, skip auth initialization entirely
+    if (landingPaths.has(path)) {
       setBootReady(true);
       try { sessionStorage.setItem('ojas.session.ready', '1'); } catch {}
-      if (u) {
-        chatStore.hydrateFromCloud().catch(() => setBootError('Failed to sync chats (offline?)'));
+      return;
+    }
+    let unsub: (() => void) | undefined;
+    const timeout: number = window.setTimeout(() => {}, 0);
+    const setup = async () => {
+      try {
+        const [{ auth }, chat] = await Promise.all([
+          import('@/lib/firebase'),
+          import('@/lib/chatStore'),
+        ]);
+        unsub = auth.onAuthStateChanged((u) => {
+          setBootReady(true);
+          try { sessionStorage.setItem('ojas.session.ready', '1'); } catch {}
+          if (u) {
+            chat.chatStore.hydrateFromCloud().catch(() => setBootError('Failed to sync chats (offline?)'));
+          }
+        });
+      } catch {
+        // If Firebase fails to load, still allow UI to render
+        setBootReady(true);
       }
-    });
-    // Hard fallback after 7s to avoid perpetual spinner if auth event never fires
+    };
+    setup();
     const fallback = window.setTimeout(() => { if (!bootReady) setBootReady(true); }, 7000);
-    return () => { unsub(); clearTimeout(timeout); clearTimeout(fallback); };
+    return () => { if (unsub) unsub(); clearTimeout(timeout); clearTimeout(fallback); };
+  }, [bootReady]);
+
+  // Idle prefetch VoiceMode chunk on app routes to minimize first-open latency
+  useEffect(() => {
+    if (!bootReady) return;
+    const p = window.location.pathname;
+    if (p.startsWith('/app') || p.startsWith('/chat') || p.startsWith('/pulse')) {
+      const run = () => { import('./pages/VoiceMode').catch(() => {}); };
+      const ric = (window as any).requestIdleCallback as ((cb: () => void, opts?: any) => void) | undefined;
+      if (ric) ric(run, { timeout: 1500 }); else setTimeout(run, 600);
+    }
+  }, [bootReady]);
+
+  // When on /pulse, also idle-prefetch the article chunk for faster detail opens
+  useEffect(() => {
+    if (!bootReady) return;
+    if (window.location.pathname.startsWith('/pulse')) {
+      const run = () => { import('./pages/PulseArticle').catch(() => {}); };
+      const ric = (window as any).requestIdleCallback as ((cb: () => void, opts?: any) => void) | undefined;
+      if (ric) ric(run, { timeout: 1500 }); else setTimeout(run, 800);
+    }
   }, [bootReady]);
 
   // Delay showing the boot overlay to avoid flash on fast refreshes
@@ -69,15 +109,20 @@ const App = () => {
     return () => clearTimeout(t);
   }, [bootReady]);
 
-  // Preload Pulse content in background once boot is ready
+  // Preload Pulse content in background once boot is ready (lazy import to avoid landing bloat)
   useEffect(() => {
     if (!bootReady) return;
-    const cache = getPulseCache();
-    const run = () => prefetchPulse().catch(() => {});
-    if (!isPulseCacheFresh(cache)) {
-      const ric = (window as any).requestIdleCallback as ((cb: () => void, opts?: any) => void) | undefined;
-      if (ric) ric(run, { timeout: 1500 }); else setTimeout(run, 200);
-    }
+    (async () => {
+      try {
+        const { prefetchPulse, getPulseCache, isPulseCacheFresh } = await import('@/lib/pulseCache');
+        const cache = getPulseCache();
+        const run = () => prefetchPulse().catch(() => {});
+        if (!isPulseCacheFresh(cache)) {
+          const ric = (window as any).requestIdleCallback as ((cb: () => void, opts?: any) => void) | undefined;
+          if (ric) ric(run, { timeout: 1500 }); else setTimeout(run, 200);
+        }
+      } catch {}
+    })();
   }, [bootReady]);
 
   // Toggle command with Ctrl/Cmd+K
@@ -104,6 +149,7 @@ const App = () => {
   const missing = requiredEnv.filter(k => !import.meta.env[k as never]);
 
   return (
+    <HelmetProvider>
     <QueryClientProvider client={queryClient}>
       <TooltipProvider>
         <Toaster />
@@ -138,29 +184,29 @@ const App = () => {
           <Routes>
             <Route path="/login" element={<React.Suspense fallback={<div className="h-screen flex items-center justify-center"><div className="oj-loader" aria-label="Loading" role="status" /><style>{`.oj-loader{width:60px;display:flex;align-items:flex-start;aspect-ratio:1}.oj-loader:before,.oj-loader:after{content:"";flex:1;aspect-ratio:1;--g:conic-gradient(from -90deg at 10px 10px,hsl(var(--primary)) 90deg,#0000 0);background:var(--g),var(--g),var(--g);filter:drop-shadow(30px 30px 0 hsl(var(--primary)));animation:l20 1s infinite}.oj-loader:after{transform:scaleX(-1)}@keyframes l20{0%{background-position:0 0,10px 10px,20px 20px}33%{background-position:10px 10px}66%{background-position:0 20px,10px 10px,20px 0}100%{background-position:0 0,10px 10px,20px 20px}}`}</style></div>}><LoginPage /></React.Suspense>} />
             <Route path="/signup" element={<React.Suspense fallback={<div className="h-screen flex items-center justify-center"><div className="oj-loader" aria-label="Loading" role="status" /><style>{`.oj-loader{width:60px;display:flex;align-items:flex-start;aspect-ratio:1}.oj-loader:before,.oj-loader:after{content:"";flex:1;aspect-ratio:1;--g:conic-gradient(from -90deg at 10px 10px,hsl(var(--primary)) 90deg,#0000 0);background:var(--g),var(--g),var(--g);filter:drop-shadow(30px 30px 0 hsl(var(--primary)));animation:l20 1s infinite}.oj-loader:after{transform:scaleX(-1)}@keyframes l20{0%{background-position:0 0,10px 10px,20px 20px}33%{background-position:10px 10px}66%{background-position:0 20px,10px 10px,20px 0}100%{background-position:0 0,10px 10px,20px 20px}}`}</style></div>}><SignupPage /></React.Suspense>} />
-            <Route path="/verify-email" element={<VerifyEmail />} />
-            <Route path="/email-action" element={<EmailAction />} />
-            <Route path="/onboarding" element={<RequireAuth><Onboarding /></RequireAuth>} />
+            <Route path="/verify-email" element={<React.Suspense fallback={<div /> }><VerifyEmail /></React.Suspense>} />
+            <Route path="/email-action" element={<React.Suspense fallback={<div /> }><EmailAction /></React.Suspense>} />
+            <Route path="/onboarding" element={<React.Suspense fallback={<div /> }><RequireAuth><Onboarding /></RequireAuth></React.Suspense>} />
             {/* Full-screen Voice Mode (no AppShell / sidebar) */}
-            <Route path="/voice" element={<RequireAuth><VoiceMode /></RequireAuth>} />
+            <Route path="/voice" element={<React.Suspense fallback={<div /> }><RequireAuth><VoiceMode /></RequireAuth></React.Suspense>} />
             {/* Full-screen Flow Demo (no AppShell / sidebar) */}
-            <Route path="/flow-demo" element={<RequireAuth><FlowDemo /></RequireAuth>} />
+            <Route path="/flow-demo" element={<React.Suspense fallback={<div /> }><RequireAuth><FlowDemo /></RequireAuth></React.Suspense>} />
             {/* Landing page at root */}
-            <Route path="/" element={<LandingPage />} />
+            <Route path="/" element={<React.Suspense fallback={<div /> }><LandingPage /></React.Suspense>} />
             {/* Landing-specific pages */}
-            <Route path="/about" element={<LandingAbout />} />
-            <Route path="/contact" element={<LandingContact />} />
-            <Route path="/faq" element={<LandingFAQ />} />
-            <Route path="/privacy" element={<LandingPrivacy />} />
-            <Route path="/terms" element={<LandingTerms />} />
+            <Route path="/about" element={<React.Suspense fallback={<div /> }><LandingAbout /></React.Suspense>} />
+            <Route path="/contact" element={<React.Suspense fallback={<div /> }><LandingContact /></React.Suspense>} />
+            <Route path="/faq" element={<React.Suspense fallback={<div /> }><LandingFAQ /></React.Suspense>} />
+            <Route path="/privacy" element={<React.Suspense fallback={<div /> }><LandingPrivacy /></React.Suspense>} />
+            <Route path="/terms" element={<React.Suspense fallback={<div /> }><LandingTerms /></React.Suspense>} />
             {/* App-specific legal pages */}
-            <Route path="/app/privacy" element={<Privacy />} />
-            <Route path="/app/terms" element={<Terms />} />
-            <Route element={<AppShell />}>
-              <Route path="/app" element={<RequireAuth><RequireProfile><Index /></RequireProfile></RequireAuth>} />
-              <Route path="/pulse" element={<RequireAuth><Pulse /></RequireAuth>} />
-              <Route path="/pulse/:id" element={<RequireAuth><PulseArticle /></RequireAuth>} />
-              <Route path="/chat/:chatId" element={<RequireAuth><RequireProfile><Index /></RequireProfile></RequireAuth>} />
+            <Route path="/app/privacy" element={<React.Suspense fallback={<div /> }><Privacy /></React.Suspense>} />
+            <Route path="/app/terms" element={<React.Suspense fallback={<div /> }><Terms /></React.Suspense>} />
+            <Route element={<React.Suspense fallback={<div className="h-screen flex items-center justify-center"><div className="oj-loader" aria-label="Loading" role="status" /><style>{`.oj-loader{width:60px;display:flex;align-items:flex-start;aspect-ratio:1}.oj-loader:before,.oj-loader:after{content:"";flex:1;aspect-ratio:1;--g:conic-gradient(from -90deg at 10px 10px,hsl(var(--primary)) 90deg,#0000 0);background:var(--g),var(--g),var(--g);filter:drop-shadow(30px 30px 0 hsl(var(--primary)));animation:l20 1s infinite}.oj-loader:after{transform:scaleX(-1)}@keyframes l20{0%{background-position:0 0,10px 10px,20px 20px}33%{background-position:10px 10px}66%{background-position:0 20px,10px 10px,20px 0}100%{background-position:0 0,10px 10px,20px 20px}}`}</style></div>}><AppShell /></React.Suspense>}>
+              <Route path="/app" element={<React.Suspense fallback={<div /> }><RequireAuth><RequireProfile><IndexPage /></RequireProfile></RequireAuth></React.Suspense>} />
+              <Route path="/pulse" element={<React.Suspense fallback={<div /> }><RequireAuth><Pulse /></RequireAuth></React.Suspense>} />
+              <Route path="/pulse/:id" element={<React.Suspense fallback={<div /> }><RequireAuth><PulseArticle /></RequireAuth></React.Suspense>} />
+              <Route path="/chat/:chatId" element={<React.Suspense fallback={<div /> }><RequireAuth><RequireProfile><IndexPage /></RequireProfile></RequireAuth></React.Suspense>} />
             </Route>
             {/* Ensure unknown nested segments like /chat/foo/bar or /pulse/foo go to 404 outside the shell */}
             <Route path="/chat/*" element={<NotFound />} />
@@ -198,6 +244,7 @@ const App = () => {
         </CommandDialog>
       </TooltipProvider>
     </QueryClientProvider>
+    </HelmetProvider>
   );
 };
 
